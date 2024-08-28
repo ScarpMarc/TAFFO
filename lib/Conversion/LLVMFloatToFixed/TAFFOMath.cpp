@@ -219,8 +219,6 @@ void createStub(Function *OldFunc)
 }
 
 
-
-
 bool partialSpecialCall(
     llvm::Function *newf, bool &foundRet, flttofix::FixedPointType &fxpret)
 {
@@ -244,26 +242,127 @@ bool partialSpecialCall(
 
 bool createAbs(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
+  LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
+
+  // Boilerplate
   llvm::LLVMContext &cont(oldf->getContext());
   DataLayout dataLayout(oldf->getParent());
-  // get first basick block of function
+
+  // Get the types of the arguments and the return value
   auto arg_type = newfs->getArg(0)->getType();
   auto ret_type = newfs->getReturnType();
+
+  LLVM_DEBUG(dbgs() << "\nThe argument type is: " << *arg_type);
+  LLVM_DEBUG(dbgs() << "\nThe return type is: " << *ret_type);
+
+  BasicBlock::Create(cont, "Entry", newfs);
   BasicBlock *where = &(newfs->getEntryBlock());
   IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // If the argument is not signed, return it as it is.
   if (ref->hasInfo(oldf->getArg(0)) && !(ref->valueInfo(oldf->getArg(0))->fixpType.scalarIsSigned())) {
     builder.CreateRet(newfs->getArg(0));
     return true;
   }
+
+  // Create a bitcast of the argument to an integer type
   LLVM_DEBUG(dbgs() << "\nGet insertion\n");
   auto *inst = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()));
   LLVM_DEBUG(dbgs() << "\nGet bitcast\n");
-  inst = builder.CreateSelect(builder.CreateICmpEQ(builder.CreateLShr(inst, arg_type->getScalarSizeInBits() - 1), llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)), builder.CreateBitCast(builder.CreateSub(llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), inst), arg_type), inst);
 
+  // Create a select instruction to handle the sign of the argument
+  inst = builder.CreateSelect(
+      // Compare for equality (1) and (2)
+      builder.CreateICmpEQ(
+          // (1): The result of shifting right the argument by the number of bits in the argument minus 1
+          builder.CreateLShr(inst, arg_type->getScalarSizeInBits() - 1),
+          // (2): The constant 1
+          llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
+      // If true (i.e., the argument is negative), return (3)
+      builder.CreateBitCast(
+          // (3): Create subtraction of (5) from (4)
+          builder.CreateSub(
+              // (4): The constant 0
+              llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0),
+              // (5): The argument
+              inst),
+          arg_type),
+      // If false (i.e., the argument is positive), return the argument as-is
+      inst);
 
-  LLVM_DEBUG(dbgs() << "\nType ret" << (ret_type->dump(), " ") << "\n");
-  LLVM_DEBUG(dbgs() << "\nType arg" << (arg_type->dump(), " ") << "\n");
+  LLVM_DEBUG(dbgs() << "Abs logic created.\n");
 
+  // Cast the integer to the return type
+  if (arg_type->isFloatingPointTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateFPCast(inst, ret_type);
+  } else if (arg_type->isFloatingPointTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateFPToSI(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateSIToFP(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateIntCast(inst, ret_type, true);
+  }
+
+  LLVM_DEBUG(dbgs() << "The result was casted to the return type.\n");
+
+  builder.CreateRet(inst);
+}
+
+/**
+ * Create the ceil function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createCeil(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
+
+  // Boilerplate
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(oldf->getParent());
+
+  // Get the types of the arguments and the return value
+  auto arg_type = newfs->getArg(0)->getType();
+  auto ret_type = newfs->getReturnType();
+
+  LLVM_DEBUG(dbgs() << "The argument type is: " << (*arg_type) << "\n");
+  LLVM_DEBUG(dbgs() << "The return type is: " << (*ret_type) << "\n");
+
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // Create a bitcast of the argument to an integer type
+  auto *inst = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()));
+
+  LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
+
+  inst = builder.CreateSelect(
+      // Compare:
+      builder.CreateICmpEQ(
+          // The fractional part of the argument
+          builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt()),
+          // The constant 0
+          llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
+      // If true (fractional part was already 0), return the argument
+      inst,
+      // If false (fractional part was nonzero): shift:
+      builder.CreateShl(
+              // The sum of:
+              builder.CreateAdd(
+                  // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+                  builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+                  // To the constant 1. This is needed because the number is encoded in two's complement
+                  llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
+              // By the amount of bits in fractional part. At this point, the fractional part is removed
+              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()));
+
+  LLVM_DEBUG(dbgs() << "Ceil logic created.\n");
+
+  // Cast the integer to the return type
   if (arg_type->isFloatingPointTy() && ret_type->isFloatingPointTy()) {
     inst = builder.CreateFPCast(inst, ret_type);
   } else if (arg_type->isFloatingPointTy() && ret_type->isIntegerTy()) {
@@ -274,8 +373,160 @@ bool createAbs(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     inst = builder.CreateIntCast(inst, ret_type, true);
   }
   builder.CreateRet(inst);
+
+  return true;
 }
 
+/**
+ * Create the floor function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createFloor(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
+
+  // Boilerplate
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(oldf->getParent());
+
+  // Get the types of the arguments and the return value
+  auto arg_type = newfs->getArg(0)->getType();
+  auto ret_type = newfs->getReturnType();
+
+  LLVM_DEBUG(dbgs() << "The argument type is: " << (*arg_type) << "\n");
+  LLVM_DEBUG(dbgs() << "The return type is: " << (*ret_type) << "\n");
+
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // Create a bitcast of the argument to an integer type
+  auto *inst = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()));
+
+  LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
+
+  inst = builder.CreateSelect(
+      // Compare:
+      builder.CreateICmpEQ(
+          // The fractional part of the argument
+          builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt()),
+          // The constant 0
+          llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
+      // If true (fractional part was already 0), return the argument
+      inst,
+      // If false (fractional part was nonzero):
+      // Shift left:
+      builder.CreateShl(
+          // The right shift of the argument by the fractional part
+          builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+          // By the amount of bits in fractional part. At this point, the fractional part is removed
+          ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()));
+
+  // Note that we need not do anything else because our number is be encoded in two's complement.
+
+  LLVM_DEBUG(dbgs() << "Floor logic created.\n");
+
+  // Cast the integer to the return type
+  if (arg_type->isFloatingPointTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateFPCast(inst, ret_type);
+  } else if (arg_type->isFloatingPointTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateFPToSI(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateSIToFP(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateIntCast(inst, ret_type, true);
+  }
+  builder.CreateRet(inst);
+
+  return true;
+}
+
+/**
+ * Create the trunc function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
+
+  // Boilerplate
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(oldf->getParent());
+
+  // Get the types of the arguments and the return value
+  auto arg_type = newfs->getArg(0)->getType();
+  auto ret_type = newfs->getReturnType();
+
+  LLVM_DEBUG(dbgs() << "The argument type is: " << (*arg_type) << "\n");
+  LLVM_DEBUG(dbgs() << "The return type is: " << (*ret_type) << "\n");
+
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // Create a bitcast of the argument to an integer type
+  auto *inst = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()));
+
+  LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
+
+  inst = builder.CreateSelect(
+      // Compare:
+      builder.CreateICmpEQ(
+          // The fractional part of the argument
+          builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt()),
+          // The constant 0
+          llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
+      // If true (fractional part was already 0), return the argument
+      inst,
+      // If false (fractional part was nonzero):
+      builder.CreateSelect(
+          // Compare:
+          builder.CreateICmpEQ(
+              // The sign (i.e., the most significant bit) of the argument
+              builder.CreateLShr(inst, arg_type->getScalarSizeInBits() - 1),
+              // The constant 0
+              llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
+          // If true (the argument is positive): shift left:
+          builder.CreateShl(
+              // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+              builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+              // By the amount of bits in fractional part. At this point, the fractional part is removed
+              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+          // If false (the argument is negative): shift right:
+          builder.CreateShl(
+              // Add:
+              builder.CreateAdd(
+                  // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+                  builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+                  // To the constant 1. This is needed because the number is encoded in two's complement
+                  llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
+              // By the amount of bits in fractional part. At this point, the fractional part is removed
+              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt())));
+
+  LLVM_DEBUG(dbgs() << "Trunc logic created.\n");
+
+  // Cast the integer to the return type
+  if (arg_type->isFloatingPointTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateFPCast(inst, ret_type);
+  } else if (arg_type->isFloatingPointTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateFPToSI(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isFloatingPointTy()) {
+    inst = builder.CreateSIToFP(inst, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isIntegerTy()) {
+    inst = builder.CreateIntCast(inst, ret_type, true);
+  }
+  builder.CreateRet(inst);
+
+  return true;
+}
 
 // TODO: add an hashmap to dispatch
 bool FloatToFixed::convertLibmFunction(
@@ -302,9 +553,26 @@ bool FloatToFixed::convertLibmFunction(
   }
 
 
-  if (taffo::start_with(fName, "abs")) {
+  if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabsf")) {
     return createAbs(this, NewFunc, OldFunc);
   }
+
+  if (taffo::start_with(fName, "ceil")) {
+    return createCeil(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "floor")) {
+    return createFloor(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "trunc")) {
+    return createTrunc(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "copysign")) {
+    //return createCopysign(this, NewFunc, OldFunc);
+  }
+
   llvm_unreachable("Function not recognized");
 }
 
