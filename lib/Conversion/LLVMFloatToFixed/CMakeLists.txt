@@ -14,7 +14,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   SinCos.cpp
   TAFFOMath.cpp
   ArcSinCos.cpp
-
+  HypCORDIC.cpp
 
   ADDITIONAL_HEADERS
   FixedPointType.h

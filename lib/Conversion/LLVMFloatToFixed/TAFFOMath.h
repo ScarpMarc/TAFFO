@@ -61,6 +61,20 @@ const double zero = 0.0f;
 const double one = 1.0f;
 const double minus_one = -1.0f;
 
+/// The number of negative iterations for range expansion in the exp CORDIC algorithm
+const int cordic_exp_negative_iterations = 6;
+/// The number of positive iterations for the exp CORDIC algorithm
+const int cordic_exp_positive_iterations = 50;
+/// Total number of iterations 
+constexpr int cordic_exp_total_iterations = cordic_exp_positive_iterations - cordic_exp_negative_iterations;
+
+const double cordic_exp_atanh_table[TABLELENGHT]
+/**
+ * @brief Table for positive iterations of the CORDIC algorithm.
+ * 
+ * Contains atanh(2^-i) for n from 0 to 64.
+ */
+const double cordic_exp_atanh_table[TABLELENGHT]
 
 /** used to couple fixedpoint to corresponding value
  * @param T lenght of array
@@ -120,7 +134,6 @@ Value *addAllocaToStart(FloatToFixed *ref, Function *oldf,
                         llvm::IRBuilder<> &builder, Type *to_alloca,
                         llvm::Value *ArraySize = (llvm::Value *)nullptr,
                         const llvm::Twine &Name = "");
-
 
 } // namespace TaffoMath
 
