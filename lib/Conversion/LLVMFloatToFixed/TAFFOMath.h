@@ -67,15 +67,39 @@ const int cordic_exp_negative_iterations = 6;
 const int cordic_exp_positive_iterations = 50;
 /// Total number of iterations
 constexpr int cordic_exp_total_iterations = cordic_exp_positive_iterations - cordic_exp_negative_iterations;
+
+/**
+ * @brief Compute the An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
+ * 
+ * This function only needs m and n, so it can be executed at compile time.
+ */
+inline constexpr double compute_An(const double &m, const double &n)
+{
+  // From i = -m to 0
+  double prod_1 = 1.0;
+  for (int i = -m; i <= 0; ++i) {
+    prod_1 *= std::sqrt(1.0 - std::pow(1 - std::pow(2.0, i - 2), 2));
+  }
+
+  double prod_2 = 1.0;
+  for (int i = 1; i <= n; ++i) {
+    prod_2 *= std::sqrt(1.0 - std::pow(2.0, -2 * i));
+  }
+
+  double prod_3 = std::sqrt(1.0 - std::pow(2.0, -2 * 4)) * std::sqrt(1.0 - std::pow(2.0, -2 * 40)) * std::sqrt(1.0 - std::pow(2.0, -2 * 4));
+
+  return prod_1 * prod_2 * prod_3;
+}
+
 /**
  * @brief Table for the exp CORDIC algorithm.
  *
  * Both tables for the negative iterations (i.e. @ref cordic_exp_negative_iterations) and positive ones (i.e. @ref cordic_exp_positive_iterations) are stored in this array. This means that the first cordic_exp_negative_iterations+1 elements are for the negative iterations, and the rest are for the positive ones.
- * 
+ *
  * This table is meant to be indexed consecutively, hence the iterator should not be reset.
- * 
+ *
  * Values for negative values are needed for range expansion; they go up to m=-6, which is good for about an exponent of 15.544 instead of about 1.12 for the original algorithm.
- * 
+ *
  * Note that having more negative iterations can make our internal values explode, but if you really need to add more iterations you should remember to update @ref cordic_exp_negative_iterations and @ref cordic_exp_positive_iterations accordingly.
  */
 const double arctanh_2power[TABLELENGHT] = {
@@ -146,20 +170,12 @@ const double arctanh_2power[TABLELENGHT] = {
     0.00000000000000001387778780781445675529539585113525479717157003073188204684548905049406255621741606226126209968930015,
     0.000000000000000006938893903907228377647697925567627064490196253841485255855686131311748167856696755228436251925837260};
 
-const double cordic_exp_atanh_table[TABLELENGHT]
-    /**
-     * @brief Table for positive iterations of the CORDIC algorithm.
-     *
-     * Contains atanh(2^-i) for n from 0 to 64.
-     */
-    const double cordic_exp_atanh_table[TABLELENGHT]
-
-    /** used to couple fixedpoint to corresponding value
-     * @param T lenght of array
-     * @param U type of llvm to couple
-     */
-    template <typename U, int T = 0>
-    struct pair_ftp_value {
+/** used to couple fixedpoint to corresponding value
+ * @param T lenght of array
+ * @param U type of llvm to couple
+ */
+template <typename U, int T = 0>
+struct pair_ftp_value {
   SmallVector<flttofix::FixedPointType, T> fpt;
   SmallVector<U, T> value;
   pair_ftp_value() {}

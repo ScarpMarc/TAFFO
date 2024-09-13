@@ -84,11 +84,14 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   // create pi variable
   TaffoMath::pair_ftp_value<llvm::Constant *> kopp(internal_fxpt);
   TaffoMath::pair_ftp_value<llvm::Constant *> zero(fxpret);
+  TaffoMath::pair_ftp_value<llvm::Constant *> An(fxpret);
 
   bool kopp_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::Kopp, internal_fxpt, kopp.value, kopp.fpt);
   bool zero_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::zero, fxpret, zero.value, zero.fpt);
+  bool An_created = TaffoMath::createFixedPointFromConst(
+      cont, ref, TaffoMath::compute_An(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), fxpret, An.value, zero.fpt);
 
   std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
 
@@ -100,6 +103,10 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   zero.value = TaffoMath::createGlobalConst(
       M, "zero" + S_ret_point, zero.fpt.scalarToLLVMType(cont), zero.value,
       dataLayout.getPrefTypeAlignment(zero.fpt.scalarToLLVMType(cont)));
+
+  zero.value = TaffoMath::createGlobalConst(
+      M, "An" + S_ret_point, An.fpt.scalarToLLVMType(cont), An.value,
+      dataLayout.getPrefTypeAlignment(An.fpt.scalarToLLVMType(cont)));
 
   /** create arctanh table
    **/
@@ -169,9 +176,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // TODO: Add constant
     // Initialise x and y to the initial constant (which depends on the amount of iterations we do)
     // x=An
-    builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(const_An.value), const_An.value), x_value.value);
+    builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(An.value), An.value), x_value.value);
     // y=An
-    builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(const_An.value), const_An.value), y_value.value);
+    builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(An.value), An.value), y_value.value);
 
     // Blocks where we check loop boundaries
     BasicBlock *check_loop_negatives = BasicBlock::Create(cont, "check_loop_negatives", newfs);
@@ -297,6 +304,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     builder.CreateBr(check_loop_positives);
     builder.SetInsertPoint(check_loop_positives);
+
+    // TODO: repeat iterations 4, 13, 40
 
     // Check whether i < (m+n); if so, go to loop body. Else, go to positive loop.
     Value *iIsLessThanN = builder.CreateICmpSLT(
