@@ -115,7 +115,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   TaffoMath::pair_ftp_value<llvm::Constant *,
                             TaffoMath::TABLELENGHT>
       arctanh_2power;
-  llvm::AllocaInst *pointer_to_array = nullptr;
+  llvm::AllocaInst *pointer_to_arctanh_array = nullptr;
 
   if (!MathZFlag) {
     for (int i = 0; i < TaffoMath::TABLELENGHT; i++) {
@@ -129,24 +129,24 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     }
 
 
-    auto arctanArrayType = llvm::ArrayType::get(arctanh_2power.value[0]->getType(),
+    auto arctanhArrayType = llvm::ArrayType::get(arctanh_2power.value[0]->getType(),
                                                 TaffoMath::TABLELENGHT);
 
-    LLVM_DEBUG(dbgs() << "ArrayType  " << arctanArrayType << "\n");
+    LLVM_DEBUG(dbgs() << "ArrayType  " << arctanhArrayType << "\n");
     auto arctanConstArray = llvm::ConstantArray::get(
-        arctanArrayType, llvm::ArrayRef<llvm::Constant *>(arctanh_2power.value));
+        arctanhArrayType, llvm::ArrayRef<llvm::Constant *>(arctanh_2power.value));
     LLVM_DEBUG(dbgs() << "ConstantDataArray tmp2 " << arctanConstArray << "\n");
     auto alignement_arctanh =
         dataLayout.getPrefTypeAlignment(arctanh_2power.value[0]->getType());
     auto arctan_g =
-        TaffoMath::createGlobalConst(M, "arctanh_g." + std::to_string(internal_fxpt.scalarFracBitsAmt()), arctanArrayType,
-                                     arctanConstArray, alignement_arctan);
+        TaffoMath::createGlobalConst(M, "arctanh_g." + std::to_string(internal_fxpt.scalarFracBitsAmt()), arctanhArrayType,
+                                     arctanConstArray, alignement_arctanh);
 
-    pointer_to_array = builder.CreateAlloca(arctanArrayType);
-    pointer_to_array->setAlignment(llvm::Align(alignement_arctanh));
+    pointer_to_arctanh_array = builder.CreateAlloca(arctanhArrayType);
+    pointer_to_arctanh_array->setAlignment(llvm::Align(alignement_arctanh));
 
     builder.CreateMemCpy(
-        pointer_to_array, llvm::Align(alignement_arctanh), arctan_g, llvm::Align(alignement_arctanh),
+        pointer_to_arctanh_array, llvm::Align(alignement_arctanh), arctan_g, llvm::Align(alignement_arctanh),
         TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
     LLVM_DEBUG(dbgs() << "\nAdd to newf arctan table"
                       << "\n");
