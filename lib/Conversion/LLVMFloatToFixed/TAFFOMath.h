@@ -69,11 +69,11 @@ const int cordic_exp_positive_iterations = 50;
 constexpr int cordic_exp_total_iterations = cordic_exp_positive_iterations - cordic_exp_negative_iterations;
 
 /**
- * @brief Compute the An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
+ * @brief Compute the 1/An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
  * 
  * This function only needs m and n, so it can be executed at compile time.
  */
-inline constexpr double compute_An(const double &m, const double &n)
+inline constexpr double compute_An_inv(const double &m, const double &n)
 {
   // From i = -m to 0
   double prod_1 = 1.0;
@@ -88,7 +88,7 @@ inline constexpr double compute_An(const double &m, const double &n)
 
   double prod_3 = std::sqrt(1.0 - std::pow(2.0, -2 * 4)) * std::sqrt(1.0 - std::pow(2.0, -2 * 40)) * std::sqrt(1.0 - std::pow(2.0, -2 * 4));
 
-  return prod_1 * prod_2 * prod_3;
+  return 1.0 / prod_1 * prod_2 * prod_3;
 }
 
 /**
@@ -231,6 +231,7 @@ Value *addAllocaToStart(FloatToFixed *ref, Function *oldf,
 
 } // namespace TaffoMath
 
+bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 
 namespace flttofix
 {

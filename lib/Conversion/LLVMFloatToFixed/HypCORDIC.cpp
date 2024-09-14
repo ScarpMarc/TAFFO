@@ -11,6 +11,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <string>
 #include <vector>
+#include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "taffo-conversion"
 
@@ -18,7 +19,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   //
   newfs->deleteBody();
-  Value *generic;
+
   Module *M = oldf->getParent();
 
   // TODO: sinh cosh exp
@@ -43,9 +44,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   if (!foundRet || !foundArg) {
     return partialSpecialCall(newfs, foundRet, fxpret);
   }
-  TaffoMath::pair_ftp_value<llvm::Value *> arg(fxparg);
-  arg.value = newfs->arg_begin();
-  auto truefxpret = fxpret;
+
 
   /*if ((fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt()) < 5) {
     fxpret = flttofix::FixedPointType(true,
@@ -55,8 +54,6 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   }*/
 
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
-
-  auto int_type = fxpret.scalarToLLVMType(cont);
 
   // FIXME FIXME
   // auto internal_fxpt = flttofix::FixedPointType(true, fxpret.scalarBitsAmt() - 2, fxpret.scalarBitsAmt());
@@ -70,30 +67,57 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   */
   auto internal_fxpt = flttofix::FixedPointType(true, 64 - 16, 64);
 
+  auto int_type = internal_fxpt.scalarToLLVMType(cont);
+  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
+  int_type->print(dbgs(),true);
+  LLVM_DEBUG(dbgs() << "\n");
+
+  auto int_type_small = fxpret.scalarToLLVMType(cont);
+  LLVM_DEBUG(dbgs() << "Return fixed point type: ");
+  int_type_small->print(dbgs(),true);
+  LLVM_DEBUG(dbgs() << "\n");
+
+  TaffoMath::pair_ftp_value<llvm::Value *> arg(internal_fxpt);
+  arg.value = newfs->arg_begin();
+  auto truefxpret = fxpret;
+
   // create local variable
   // TODO: Check bit width for this
-  TaffoMath::pair_ftp_value<llvm::Value *> x_value(fxpret);
-  TaffoMath::pair_ftp_value<llvm::Value *> y_value(fxpret);
+  TaffoMath::pair_ftp_value<llvm::Value *> x_value(internal_fxpt);
+  TaffoMath::pair_ftp_value<llvm::Value *> y_value(internal_fxpt);
   x_value.value = builder.CreateAlloca(int_type, nullptr, "x");
   y_value.value = builder.CreateAlloca(int_type, nullptr, "y");
 
-  Value *arg_value = builder.CreateAlloca(int_type, nullptr, "arg");
-  builder.CreateStore(newfs->getArg(0), arg_value);
-  Value *i_iterator = builder.CreateAlloca(int_type, nullptr, "iterator");
+  // Create a variable arg_value to store the first argument's value, but casted to int_type
+  //Value *arg_value = builder.CreateAlloca(int_type, nullptr, "arg");
+  //builder.CreateStore(newfs->getArg(0), arg_value);
 
-  // create pi variable
+  // Allocate memory for arg_value
+  Value *arg_value = builder.CreateAlloca(int_type, nullptr, "arg");
+
+  // Cast the function argument to the internal fixed point type
+  Value *casted_arg = builder.CreateBitCast(newfs->getArg(0), int_type);
+
+  // Store the casted value in arg_value
+  builder.CreateStore(casted_arg, arg_value);
+
+  Value *i_iterator = builder.CreateAlloca(int_type_small, nullptr, "iterator");
+
   TaffoMath::pair_ftp_value<llvm::Constant *> kopp(internal_fxpt);
-  TaffoMath::pair_ftp_value<llvm::Constant *> zero(fxpret);
-  TaffoMath::pair_ftp_value<llvm::Constant *> An(fxpret);
+  TaffoMath::pair_ftp_value<llvm::Constant *> zero(internal_fxpt);
+  TaffoMath::pair_ftp_value<llvm::Constant *> An(internal_fxpt);
+
+  LLVM_DEBUG(dbgs() << "Initialising variables. 1/An=" << TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations)
+                   << "\n");
 
   bool kopp_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::Kopp, internal_fxpt, kopp.value, kopp.fpt);
-  bool zero_created = TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::zero, fxpret, zero.value, zero.fpt);
-  bool An_created = TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::compute_An(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), fxpret, An.value, zero.fpt);
+  TaffoMath::createFixedPointFromConst(
+      cont, ref, TaffoMath::zero, internal_fxpt, zero.value, zero.fpt);
+  TaffoMath::createFixedPointFromConst(
+      cont, ref, TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), internal_fxpt, An.value, An.fpt);
 
-  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
+  std::string S_ret_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
 
   if (kopp_created)
     kopp.value = TaffoMath::createGlobalConst(
@@ -104,13 +128,13 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       M, "zero" + S_ret_point, zero.fpt.scalarToLLVMType(cont), zero.value,
       dataLayout.getPrefTypeAlignment(zero.fpt.scalarToLLVMType(cont)));
 
-  zero.value = TaffoMath::createGlobalConst(
+  An.value = TaffoMath::createGlobalConst(
       M, "An" + S_ret_point, An.fpt.scalarToLLVMType(cont), An.value,
       dataLayout.getPrefTypeAlignment(An.fpt.scalarToLLVMType(cont)));
 
   /** create arctanh table
    **/
-  LLVM_DEBUG(dbgs() << "Create arctanh table"
+  LLVM_DEBUG(dbgs() << "===== Create arctanh table ====="
                     << "\n");
   TaffoMath::pair_ftp_value<llvm::Constant *,
                             TaffoMath::TABLELENGHT>
@@ -119,15 +143,15 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   if (!MathZFlag) {
     for (int i = 0; i < TaffoMath::TABLELENGHT; i++) {
-      arctanh_2power.fpt.push_back(flttofix::FixedPointType(fxpret));
+      LLVM_DEBUG(dbgs() << "Element " <<  i << ":\n");
+      arctanh_2power.fpt.push_back(flttofix::FixedPointType(internal_fxpt));
       Constant *tmp = nullptr;
       auto &current_fpt = arctanh_2power.fpt.front();
       TaffoMath::createFixedPointFromConst(
           cont, ref, TaffoMath::arctanh_2power[i], internal_fxpt, tmp, current_fpt);
       arctanh_2power.value.push_back(tmp);
-      LLVM_DEBUG(dbgs() << i << ")");
+      LLVM_DEBUG(dbgs() << "\n");
     }
-
 
     auto arctanhArrayType = llvm::ArrayType::get(arctanh_2power.value[0]->getType(),
                                                 TaffoMath::TABLELENGHT);
@@ -148,13 +172,15 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateMemCpy(
         pointer_to_arctanh_array, llvm::Align(alignement_arctanh), arctan_g, llvm::Align(alignement_arctanh),
         TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
-    LLVM_DEBUG(dbgs() << "\nAdd to newf arctan table"
+    LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table"
                       << "\n");
   }
 
   BasicBlock *body = BasicBlock::Create(cont, "body", newfs);
   builder.CreateBr(body);
   builder.SetInsertPoint(body);
+  LLVM_DEBUG(dbgs() << "Create body"
+                    << "\n");
   arg.value = arg_value;
   BasicBlock *return_point = BasicBlock::Create(cont, "return_point", newfs);
   // handle unsigned arg
@@ -164,21 +190,32 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     fxparg.scalarIsSigned() = true;
   }
 
+  LLVM_DEBUG(dbgs() << "fxparg: " << fxparg.scalarBitsAmt() << " frac part: " << fxparg.scalarFracBitsAmt() << " difference: " << fxparg.scalarBitsAmt() - fxparg.scalarFracBitsAmt() << "\n");
+
   // TODO: Handle sinh, cosh, etc.
 
   // TODO: Handle special cases
 
-  // calculate sin and cos
+  // calculate exp
   if (!MathZFlag) {
+    LLVM_DEBUG(dbgs() << "Starting exp routine"
+                      << "\n");
     builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg_value);
 
     auto zero_arg = builder.CreateLoad(getElementTypeFromValuePointer(zero.value), zero.value);
+
+    LLVM_DEBUG(dbgs() << "Zero value set"
+                      << "\n");
+
     // TODO: Add constant
     // Initialise x and y to the initial constant (which depends on the amount of iterations we do)
     // x=An
     builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(An.value), An.value), x_value.value);
     // y=An
     builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(An.value), An.value), y_value.value);
+
+    LLVM_DEBUG(dbgs() << "Initial x and y set"
+                      << "\n");
 
     // Blocks where we check loop boundaries
     BasicBlock *check_loop_negatives = BasicBlock::Create(cont, "check_loop_negatives", newfs);
@@ -187,7 +224,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // Main loop bodies
     BasicBlock *start_loop_negatives = BasicBlock::Create(cont, "start_loop_negatives", newfs);
     BasicBlock *start_loop_positives = BasicBlock::Create(cont, "start_loop_positives", newfs);
-    BasicBlock *epilog_loop = BasicBlock::Create(cont, "epilog_loop", newfs);
+
+    LLVM_DEBUG(dbgs() << "Initial blocks set"
+                      << "\n");
 
     /*
       We need to iterate from -m to 0 and then from 1 to n.
@@ -198,7 +237,10 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     // NEGATIVE LOOP
 
-    builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(zero.value), zero.value), i_iterator);
+    LLVM_DEBUG(dbgs() << "Start negative loop"
+                      << "\n");
+
+    builder.CreateStore(zero_arg, i_iterator);
 
     builder.CreateBr(check_loop_negatives);
     builder.SetInsertPoint(check_loop_negatives);
@@ -206,7 +248,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // Check whether i < m; if so, go to loop body. Else, go to positive loop.
     Value *iIsLessThanM = builder.CreateICmpSLT(
         builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-        ConstantInt::get(int_type, TaffoMath::cordic_exp_negative_iterations));
+        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_negative_iterations));
 
     // Execute the loop if i < m; else, go to the positive loop.
     builder.CreateCondBr(iIsLessThanM, start_loop_negatives,
@@ -214,18 +256,30 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     {
       builder.SetInsertPoint(start_loop_negatives);
 
+      LLVM_DEBUG(dbgs() << "Start negative loop body"
+                        << "\n");
+
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign = builder.CreateSelect(
           builder.CreateICmpSGE(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), zero_arg),
           ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1));
 
+      LLVM_DEBUG(dbgs() << "Sign set"
+                        << "\n");
+
       // update_sign > 0 ?
       auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg);
+
+      LLVM_DEBUG(dbgs() << "Sign greater than zero set"
+                        << "\n");
 
       // shift_amt = i+2
       Value *shift_amt = builder.CreateAdd(
           builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
           ConstantInt::get(int_type, 2));
+
+      LLVM_DEBUG(dbgs() << "Shift amount set"
+                        << "\n");
 
       // Temp value to store y_{k+1}
       Value *x_update;
@@ -235,20 +289,32 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         // Update y. The update reads x.
 
         // Calculate x * (2 ^ -shift_amt)
-        Value *y_update = builder.CreateAShr(
+        y_update = builder.CreateAShr(
             builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), shift_amt);
+
+        LLVM_DEBUG(dbgs() << "y_update 1 calculated"
+                          << "\n");
 
         // Calculate x - x * (2 ^ -shift_amt)
         y_update = builder.CreateSub(
             builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), y_update);
 
+        LLVM_DEBUG(dbgs() << "y_update 2 calculated"
+                          << "\n");
+
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
             update_sign_greater_zero, builder.CreateSub(zero_arg, y_update), y_update);
 
+        LLVM_DEBUG(dbgs() << "y_update 3 calculated"
+                          << "\n");
+
         // y_{k+1} = y_k + y_update. Set to temp value since we will need to use y next.
         y_update = builder.CreateAdd(
             builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), y_update);
+
+        LLVM_DEBUG(dbgs() << "y_update 4 calculated"
+                          << "\n");
       }
 
       {
@@ -258,24 +324,42 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         x_update = builder.CreateAShr(
             builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), shift_amt);
 
+        LLVM_DEBUG(dbgs() << "x_update 1 calculated"
+                          << "\n");
+
         // Calculate y - y * (2 ^ -shift_amt)
         x_update = builder.CreateSub(
             builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), x_update);
+
+        LLVM_DEBUG(dbgs() << "x_update 2 calculated"
+                          << "\n");
 
         // Calculate (update_sign > 0 ? -(y - y * (2 ^ -shift_amt)) : (y - y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
             update_sign_greater_zero, builder.CreateSub(zero_arg, x_update), x_update);
 
+        LLVM_DEBUG(dbgs() << "x_update 3 calculated"
+                          << "\n");
+
         // x_{k+1} = x_k + x_update
         x_update =
             builder.CreateAdd(x_update, builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value));
+
+        LLVM_DEBUG(dbgs() << "x_update 4 calculated"
+                          << "\n");
       }
 
       // Store y_update into y
       builder.CreateStore(y_update, y_value.value);
 
+      LLVM_DEBUG(dbgs() << "y_update stored"
+                        << "\n");
+
       // Store x_update into x
       builder.CreateStore(x_update, x_value.value);
+
+      LLVM_DEBUG(dbgs() << "x_update stored"
+                        << "\n");
 
       {
         // Update z (= arg)
@@ -284,19 +368,34 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         Value *update_z = builder.CreateGEP(getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
                                             {zero_arg, builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator)});
 
+        LLVM_DEBUG(dbgs() << "update_z 1 calculated"
+                          << "\n");
+
         update_z = builder.CreateLoad(getElementTypeFromValuePointer(update_z), update_z);
+
+        LLVM_DEBUG(dbgs() << "update_z 2 calculated"
+                          << "\n");
 
         update_z = builder.CreateSelect(
             update_sign_greater_zero, builder.CreateSub(zero_arg, update_z), update_z);
 
+        LLVM_DEBUG(dbgs() << "update_z 3 calculated"
+                          << "\n");
+
         builder.CreateStore(
             builder.CreateAdd(update_z, builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value)), arg_value);
+
+        LLVM_DEBUG(dbgs() << "update_z stored"
+                          << "\n");
       }
 
       // i++
-      builder.CreateStore(builder.CreateSub(builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-                                            ConstantInt::get(int_type, 1)),
-                          i_iterator);
+      builder.CreateStore(builder.CreateAdd(builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
+                                          ConstantInt::get(int_type_small, 1)),
+                        i_iterator);
+
+      LLVM_DEBUG(dbgs() << "i incremented"
+                        << "\n");
       builder.CreateBr(check_loop_negatives);
     }
 
@@ -305,17 +404,23 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateBr(check_loop_positives);
     builder.SetInsertPoint(check_loop_positives);
 
+    LLVM_DEBUG(dbgs() << "Start positive loop"
+                      << "\n");
+
     // TODO: repeat iterations 4, 13, 40
 
     // Check whether i < (m+n); if so, go to loop body. Else, go to positive loop.
     Value *iIsLessThanN = builder.CreateICmpSLT(
         builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-        ConstantInt::get(int_type, TaffoMath::cordic_exp_total_iterations));
+        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_total_iterations));
 
     // Execute the loop if i < m+n; else, go to the end of the function.
     builder.CreateCondBr(iIsLessThanN, start_loop_positives,
                          return_point);
     {
+      LLVM_DEBUG(dbgs() << "Start positive loop body"
+                        << "\n");
+
       builder.SetInsertPoint(start_loop_positives);
 
       // sign = arg >= 0 ? 1 : -1;
@@ -339,7 +444,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         // Update y. The update reads x.
 
         // Calculate x * (2 ^ -shift_amt)
-        Value *y_update = builder.CreateAShr(
+        y_update = builder.CreateAShr(
             builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), shift_amt);
 
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
@@ -391,7 +496,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
       // i++
       builder.CreateStore(builder.CreateSub(builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-                                            ConstantInt::get(int_type, 1)),
+                                            ConstantInt::get(int_type_small, 1)),
                           i_iterator);
       builder.CreateBr(check_loop_negatives);
 
@@ -401,6 +506,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   } else {
     // TODO
   }
+
+  LLVM_DEBUG(dbgs() << "End of exp routine"
+                    << "\n");
 
   {
     // TODO: handle other functions
