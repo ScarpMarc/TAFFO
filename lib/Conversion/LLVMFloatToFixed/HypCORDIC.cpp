@@ -116,8 +116,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   Value *i_iterator = builder.CreateAlloca(int_type_small, nullptr, "iterator");
 
   TaffoMath::pair_ftp_value<llvm::Constant *> kopp(internal_fxpt);
-  TaffoMath::pair_ftp_value<llvm::Constant *> zero_internal(internal_fxpt);
-  TaffoMath::pair_ftp_value<llvm::Constant *> zero_small(fxpret);
+  TaffoMath::pair_ftp_value<llvm::Constant *> zero_wide(internal_fxpt);
+  TaffoMath::pair_ftp_value<llvm::Constant *> zero_narrow(fxpret);
   TaffoMath::pair_ftp_value<llvm::Constant *> An(internal_fxpt);
 
   LLVM_DEBUG(dbgs() << "Initialising variables. 1/An=" << TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations)
@@ -126,9 +126,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   bool kopp_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::Kopp, internal_fxpt, kopp.value, kopp.fpt);
   TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::zero, internal_fxpt, zero_internal.value, zero_internal.fpt);
+      cont, ref, TaffoMath::zero, internal_fxpt, zero_wide.value, zero_wide.fpt);
   TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::zero, fxpret, zero_small.value, zero_small.fpt);
+      cont, ref, TaffoMath::zero, fxpret, zero_narrow.value, zero_narrow.fpt);
   TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), internal_fxpt, An.value, An.fpt);
 
@@ -139,13 +139,13 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         M, "kopp" + S_ret_point, kopp.fpt.scalarToLLVMType(cont), kopp.value,
         dataLayout.getPrefTypeAlignment(kopp.fpt.scalarToLLVMType(cont)));
 
-  zero_internal.value = TaffoMath::createGlobalConst(
-      M, "zero_internal" + S_ret_point, zero_internal.fpt.scalarToLLVMType(cont), zero_internal.value,
-      dataLayout.getPrefTypeAlignment(zero_internal.fpt.scalarToLLVMType(cont)));
+  zero_wide.value = TaffoMath::createGlobalConst(
+      M, "zero_wide" + S_ret_point, zero_wide.fpt.scalarToLLVMType(cont), zero_wide.value,
+      dataLayout.getPrefTypeAlignment(zero_wide.fpt.scalarToLLVMType(cont)));
 
-  zero_small.value = TaffoMath::createGlobalConst(
-      M, "zero_small" + S_ret_point, zero_small.fpt.scalarToLLVMType(cont), zero_small.value,
-      dataLayout.getPrefTypeAlignment(zero_small.fpt.scalarToLLVMType(cont)));
+  zero_narrow.value = TaffoMath::createGlobalConst(
+      M, "zero_narrow" + S_ret_point, zero_narrow.fpt.scalarToLLVMType(cont), zero_narrow.value,
+      dataLayout.getPrefTypeAlignment(zero_narrow.fpt.scalarToLLVMType(cont)));
 
   An.value = TaffoMath::createGlobalConst(
       M, "An" + S_ret_point, An.fpt.scalarToLLVMType(cont), An.value,
@@ -201,7 +201,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   LLVM_DEBUG(dbgs() << "Create init"
                     << "\n");
   arg.value = arg_value;
-  BasicBlock *return_point = BasicBlock::Create(cont, "return_point", newfs);
+  BasicBlock *finalize = BasicBlock::Create(cont, "finalize", newfs);
   // handle unsigned arg
   if (!fxparg.scalarIsSigned()) {
     builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), ConstantInt::get(int_type, 1)), arg_value);
@@ -221,12 +221,12 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                       << "\n");
     // builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg_value);
 
-    auto zero_arg_wide = builder.CreateLoad(getElementTypeFromValuePointer(zero_internal.value), zero_internal.value, "zero_wide");
+    auto zero_arg_wide = builder.CreateLoad(getElementTypeFromValuePointer(zero_wide.value), zero_wide.value, "zero_wide");
     LLVM_DEBUG(dbgs() << "zero_arg_wide: ");
     zero_arg_wide->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto zero_arg_narrow = builder.CreateLoad(getElementTypeFromValuePointer(zero_small.value), zero_small.value, "zero_narrow");
+    auto zero_arg_narrow = builder.CreateLoad(getElementTypeFromValuePointer(zero_narrow.value), zero_narrow.value, "zero_narrow");
     LLVM_DEBUG(dbgs() << "zero_arg_narrow: ");
     zero_arg_narrow->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
@@ -469,7 +469,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     // Execute the loop if i < m+n; else, go to the end of the function.
     builder.CreateCondBr(iIsLessThanN, loop_body_positives,
-                         return_point);
+                         finalize);
     {
       builder.SetInsertPoint(loop_body_positives);
 
@@ -605,10 +605,10 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       builder.CreateStore(builder.CreateSub(iterator_value,
                                             ConstantInt::get(int_type_small, 1), "iterator_value_next_loop1"),
                           i_iterator);
-      builder.CreateBr(check_loop_negatives);
+      builder.CreateBr(check_loop_positives);
 
       // Set the insert point to the end of the function, which is after the else.
-      builder.SetInsertPoint(return_point);
+      builder.SetInsertPoint(finalize);
     }
   } else {
     // TODO
