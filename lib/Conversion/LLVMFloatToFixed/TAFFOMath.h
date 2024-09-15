@@ -67,6 +67,10 @@ const int cordic_exp_negative_iterations = 6;
 const int cordic_exp_positive_iterations = 50;
 /// Total number of iterations
 constexpr int cordic_exp_total_iterations = cordic_exp_positive_iterations - cordic_exp_negative_iterations;
+/// Width of the extended, internal representation for the exp CORDIC algorithm
+const unsigned int cordic_exp_internal_width = 64;
+/// Fractional part of the internal representation for the exp CORDIC algorithm
+const unsigned int cordic_exp_internal_width_fractional = 48;
 
 /**
  * @brief Compute the 1/An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
