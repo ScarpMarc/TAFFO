@@ -246,6 +246,10 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     BasicBlock *start_loop_negatives = BasicBlock::Create(cont, "start_loop_negatives", newfs);
     BasicBlock *start_loop_positives = BasicBlock::Create(cont, "start_loop_positives", newfs);
 
+    // Temp values to store updates
+      Value *x_update;
+      Value *y_update;
+
     LLVM_DEBUG(dbgs() << "Initial blocks set"
                       << "\n");
 
@@ -304,10 +308,6 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
       LLVM_DEBUG(dbgs() << "Shift amount set"
                         << "\n");
-
-      // Temp value to store y_{k+1}
-      Value *x_update;
-      Value *y_update;
 
       {
         // Update y. The update reads x.
@@ -452,17 +452,22 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
           builder.CreateICmpSGE(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), zero_arg_internal),
           ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1));
 
+      LLVM_DEBUG(dbgs() << "Sign set"
+                        << "\n");
+
       // update_sign > 0 ?
       auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg_internal);
 
-      // shift_amt = i-m since we do not reset i
-      Value *shift_amt = builder.CreateSub(
-          builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
+      LLVM_DEBUG(dbgs() << "Sign greater than zero set"
+                        << "\n");
+
+      // shift_amt = i-m since we do not reset i (again, casted to larger type since otherwise LLVM will complain)
+      Value *shift_amt = builder.CreateSub(builder.CreateZExt(
+          builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator), int_type),
           ConstantInt::get(int_type, TaffoMath::cordic_exp_negative_iterations));
 
-      // Temp value to store y_{k+1}
-      Value *x_update;
-      Value *y_update;
+      LLVM_DEBUG(dbgs() << "Shift amount set"
+                        << "\n");
 
       {
         // Update y. The update reads x.
@@ -471,13 +476,22 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         y_update = builder.CreateAShr(
             builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), shift_amt);
 
+        LLVM_DEBUG(dbgs() << "y_update 1 calculated"
+                          << "\n");
+
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
             update_sign_greater_zero, builder.CreateSub(zero_arg_internal, y_update), y_update);
 
+        LLVM_DEBUG(dbgs() << "y_update 2 calculated"
+                          << "\n");
+
         // y_{k+1} = y_k + y_update. Set to temp value since we will need to use y next.
         y_update = builder.CreateAdd(
             builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), y_update);
+
+        LLVM_DEBUG(dbgs() << "y_update 3 calculated"
+                          << "\n");
       }
 
       {
@@ -487,13 +501,22 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         x_update = builder.CreateAShr(
             builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), shift_amt);
 
+        LLVM_DEBUG(dbgs() << "x_update 1 calculated"
+                          << "\n");
+
         // Calculate (update_sign > 0 ? -(y - y * (2 ^ -shift_amt)) : (y - y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
             update_sign_greater_zero, builder.CreateSub(zero_arg_internal, x_update), x_update);
 
+        LLVM_DEBUG(dbgs() << "x_update 2 calculated"
+                          << "\n");
+
         // x_{k+1} = x_k + x_update
         x_update =
             builder.CreateAdd(x_update, builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value));
+
+        LLVM_DEBUG(dbgs() << "x_update 3 calculated"
+                          << "\n");
       }
 
       // Store y_update into y
@@ -501,6 +524,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
       // Store x_update into x
       builder.CreateStore(x_update, x_value.value);
+
+      LLVM_DEBUG(dbgs() << "x and y updated"
+                        << "\n");
 
       {
         // Update z (= arg)
