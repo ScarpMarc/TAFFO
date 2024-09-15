@@ -924,8 +924,11 @@ bool createSinCos(FloatToFixed * ref,
     builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), truefxpret.scalarFracBitsAmt() - internal_fxpt.scalarFracBitsAmt()), arg_value);
   }
 
-  auto ret = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value);
+  LLVM_DEBUG(dbgs() << "arg_value: ");
+    arg_value->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "\n");
 
+  auto ret = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value);
 
   BasicBlock *end = BasicBlock::Create(cont, "end", newfs);
   builder.CreateBr(end);
