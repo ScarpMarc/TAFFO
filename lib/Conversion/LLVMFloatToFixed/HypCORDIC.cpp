@@ -195,10 +195,10 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                       << "\n");
   }
 
-  BasicBlock *body = BasicBlock::Create(cont, "body", newfs);
-  builder.CreateBr(body);
-  builder.SetInsertPoint(body);
-  LLVM_DEBUG(dbgs() << "Create body"
+  BasicBlock *init = BasicBlock::Create(cont, "init", newfs);
+  builder.CreateBr(init);
+  builder.SetInsertPoint(init);
+  LLVM_DEBUG(dbgs() << "Create init"
                     << "\n");
   arg.value = arg_value;
   BasicBlock *return_point = BasicBlock::Create(cont, "return_point", newfs);
@@ -221,14 +221,14 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                       << "\n");
     // builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg_value);
 
-    auto zero_arg_internal = builder.CreateLoad(getElementTypeFromValuePointer(zero_internal.value), zero_internal.value, "zero_wide");
-    LLVM_DEBUG(dbgs() << "zero_arg_internal: ");
-    zero_arg_internal->print(dbgs(), true);
+    auto zero_arg_wide = builder.CreateLoad(getElementTypeFromValuePointer(zero_internal.value), zero_internal.value, "zero_wide");
+    LLVM_DEBUG(dbgs() << "zero_arg_wide: ");
+    zero_arg_wide->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto zero_arg_small = builder.CreateLoad(getElementTypeFromValuePointer(zero_small.value), zero_small.value, "zero_narrow");
-    LLVM_DEBUG(dbgs() << "zero_arg_small: ");
-    zero_arg_small->print(dbgs(), true);
+    auto zero_arg_narrow = builder.CreateLoad(getElementTypeFromValuePointer(zero_small.value), zero_small.value, "zero_narrow");
+    LLVM_DEBUG(dbgs() << "zero_arg_narrow: ");
+    zero_arg_narrow->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
     LLVM_DEBUG(dbgs() << "Zero value set"
@@ -250,8 +250,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     BasicBlock *check_loop_positives = BasicBlock::Create(cont, "check_loop_positives", newfs);
 
     // Main loop bodies
-    BasicBlock *start_loop_negatives = BasicBlock::Create(cont, "start_loop_negatives", newfs);
-    BasicBlock *start_loop_positives = BasicBlock::Create(cont, "start_loop_positives", newfs);
+    BasicBlock *loop_body_negatives = BasicBlock::Create(cont, "loop_body_negatives", newfs);
+    BasicBlock *loop_body_positives = BasicBlock::Create(cont, "loop_body_positives", newfs);
 
     // Temp values to store updates
     Value *x_update;
@@ -272,7 +272,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     LLVM_DEBUG(dbgs() << "Start negative loop"
                       << "\n");
 
-    builder.CreateStore(zero_arg_small, i_iterator);
+    builder.CreateStore(zero_arg_narrow, i_iterator);
 
     LLVM_DEBUG(dbgs() << "Iterator set"
                       << "\n");
@@ -285,37 +285,44 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // Check whether i < m; if so, go to loop body. Else, go to positive loop.
     Value *iIsLessThanM = builder.CreateICmpSLT(
         iterator_value,
-        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_negative_iterations), "i_is_less_than_m");
+        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_negative_iterations), "loop_condition_negatives");
 
     // Execute the loop if i < m; else, go to the positive loop.
-    builder.CreateCondBr(iIsLessThanM, start_loop_negatives,
+    builder.CreateCondBr(iIsLessThanM, loop_body_negatives,
                          check_loop_positives);
     {
-      builder.SetInsertPoint(start_loop_negatives);
+      builder.SetInsertPoint(loop_body_negatives);
 
       LLVM_DEBUG(dbgs() << "Start negative loop body"
                         << "\n");
 
+      // Current argument value
+      auto arg_value_load = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "arg_prev_loop1");
+      // Current x and y values
+      auto x_value_load = builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value, "x_prev_loop1");
+      auto y_value_load = builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value, "y_prev_loop1");
+
+
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGE(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "arg_value_loop1"), zero_arg_internal, "arg_greater_than_zero"),
-          ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1));
+          builder.CreateICmpSGE(arg_value_load, zero_arg_wide, "arg_greater_zero_loop1"),
+          ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1), "update_sign_loop1");
 
-      //Value *update_sign = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "update_sign");
+      // Value *update_sign = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "update_sign");
 
       LLVM_DEBUG(dbgs() << "Sign set"
                         << "\n");
 
       // update_sign > 0 ?
-      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg_internal, "update_sign_greater_zero");
+      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg_wide, "update_sign_greater_zero_loop1");
 
       LLVM_DEBUG(dbgs() << "Sign greater than zero set"
                         << "\n");
 
       // shift_amt = i+2 (casted to larger type since otherwise LLVM will complain)
       Value *shift_amt = builder.CreateAdd(builder.CreateZExt(
-                                               iterator_value, int_type),
-                                           ConstantInt::get(int_type, 2), "shift_amt");
+                                               iterator_value, int_type, "i_iterator_wide_loop1"),
+                                           ConstantInt::get(int_type, 2), "shift_amt_loop1");
 
       LLVM_DEBUG(dbgs() << "Shift amount set"
                         << "\n");
@@ -325,28 +332,28 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate x * (2 ^ -shift_amt)
         y_update = builder.CreateAShr(
-            builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), shift_amt, "y_update_1");
+            x_value_load, shift_amt, "y_upd_1_loop1");
 
         LLVM_DEBUG(dbgs() << "y_update 1 calculated"
                           << "\n");
 
         // Calculate x - x * (2 ^ -shift_amt)
         y_update = builder.CreateSub(
-            builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), y_update, "y_update_2");
+            x_value_load, y_update, "y_upd_2_loop1");
 
         LLVM_DEBUG(dbgs() << "y_update 2 calculated"
                           << "\n");
 
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, y_update), y_update, "y_update_3");
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, y_update, "minus_y_upd_2_loop1"), y_update, "y_upd_3_loop1");
 
         LLVM_DEBUG(dbgs() << "y_update 3 calculated"
                           << "\n");
 
         // y_{k+1} = y_k + y_update. Set to temp value since we will need to use y next.
         y_update = builder.CreateAdd(
-            builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), y_update, "y_update_4");
+            y_value_load, y_update, "y_upd_4_loop1");
 
         LLVM_DEBUG(dbgs() << "y_update 4 calculated"
                           << "\n");
@@ -357,28 +364,28 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate y * (2 ^ -shift_amt)
         x_update = builder.CreateAShr(
-            builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), shift_amt, "x_update_1");
+            y_value_load, shift_amt, "x_upd_1_loop1");
 
         LLVM_DEBUG(dbgs() << "x_update 1 calculated"
                           << "\n");
 
         // Calculate y - y * (2 ^ -shift_amt)
         x_update = builder.CreateSub(
-            builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), x_update, "x_update_2");
+            y_value_load, x_update, "x_upd_2_loop1");
 
         LLVM_DEBUG(dbgs() << "x_update 2 calculated"
                           << "\n");
 
         // Calculate (update_sign > 0 ? -(y - y * (2 ^ -shift_amt)) : (y - y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, x_update), x_update, "x_update_3");
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, x_update, "minus_x_upd_2_loop1"), x_update, "x_upd_3_loop1");
 
         LLVM_DEBUG(dbgs() << "x_update 3 calculated"
                           << "\n");
 
         // x_{k+1} = x_k + x_update
         x_update =
-            builder.CreateAdd(x_update, builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), "x_update_4");
+            builder.CreateAdd(x_value_load, x_update, "x_upd_4_loop1");
 
         LLVM_DEBUG(dbgs() << "x_update 4 calculated"
                           << "\n");
@@ -396,12 +403,17 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       LLVM_DEBUG(dbgs() << "x_update stored"
                         << "\n");
 
+      /*
+        The two parts where we update z and increment the counter are identical for the negative and positive loops and could theoretically be made into a single subroutine.
+        However, we want to avoid checking where we are each time, so we duplicate the code.
+      */
+
       {
         // Update z (= arg)
 
         // Calculate arctanh_2power[i]
         Value *z_update = builder.CreateGEP(getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
-                                            {zero_arg_internal, builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator)}, "arctanh_2power_i_pointer");
+                                            {zero_arg_wide, iterator_value}, "arctanh_2power_i_pointer_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update: ");
         z_update->print(dbgs(), true);
@@ -410,27 +422,27 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         LLVM_DEBUG(dbgs() << "z_update 1 calculated"
                           << "\n");
 
-        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "arctanh_2power_i");
+        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "arctanh_2power_i_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update 2 calculated"
                           << "\n");
 
         z_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, z_update), z_update, "z_update_2");
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_arctanh_2power_i_loop1"), z_update, "arg_update_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update 3 calculated"
                           << "\n");
 
         builder.CreateStore(
-            builder.CreateAdd(z_update, builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value), "arg_increment"), arg_value);
+            builder.CreateAdd(z_update, arg_value_load, "arg_increment_loop1"), arg_value);
 
         LLVM_DEBUG(dbgs() << "z_update stored"
                           << "\n");
       }
 
       // i++
-      builder.CreateStore(builder.CreateAdd(builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-                                            ConstantInt::get(int_type_small, 1), "i_increment"),
+      builder.CreateStore(builder.CreateAdd(iterator_value,
+                                            ConstantInt::get(int_type_small, 1), "iterator_value_next_loop1"),
                           i_iterator);
 
       LLVM_DEBUG(dbgs() << "i incremented"
@@ -453,35 +465,42 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // Check whether i < (m+n); if so, go to loop body. Else, go to positive loop.
     Value *iIsLessThanN = builder.CreateICmpSLT(
         iterator_value,
-        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_total_iterations), "i_is_less_than_m");
+        ConstantInt::get(int_type_small, TaffoMath::cordic_exp_total_iterations), "loop_condition_positives");
 
     // Execute the loop if i < m+n; else, go to the end of the function.
-    builder.CreateCondBr(iIsLessThanN, start_loop_positives,
+    builder.CreateCondBr(iIsLessThanN, loop_body_positives,
                          return_point);
     {
+      builder.SetInsertPoint(loop_body_positives);
+
       LLVM_DEBUG(dbgs() << "Start positive loop body"
                         << "\n");
 
-      builder.SetInsertPoint(start_loop_positives);
+      // Current argument value
+      auto arg_value_load = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "arg_prev_loop2");
+      // Current x and y values
+      auto x_value_load = builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value, "x_prev_loop2");
+      auto y_value_load = builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value, "y_prev_loop2");
+
 
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGE(builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "arg_value_loop2"), zero_arg_internal, "arg_greater_than_zero"),
-          ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1));
+          builder.CreateICmpSGE(arg_value_load, zero_arg_wide, "arg_greater_zero_loop2"),
+          ConstantInt::get(int_type, 1), ConstantInt::get(int_type, -1), "update_sign_loop2");
 
       LLVM_DEBUG(dbgs() << "Sign set"
                         << "\n");
 
       // update_sign > 0 ?
-      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg_internal);
+      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_arg_wide, "update_sign_greater_zero_loop2");
 
       LLVM_DEBUG(dbgs() << "Sign greater than zero set"
                         << "\n");
 
       // shift_amt = i-m since we do not reset i (again, casted to larger type since otherwise LLVM will complain)
       Value *shift_amt = builder.CreateSub(builder.CreateZExt(
-                                               builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator), int_type),
-                                           ConstantInt::get(int_type, TaffoMath::cordic_exp_negative_iterations));
+                                               iterator_value, int_type, "i_iterator_wide_loop2"),
+                                           ConstantInt::get(int_type, TaffoMath::cordic_exp_negative_iterations), "shift_amt_loop2");
 
       LLVM_DEBUG(dbgs() << "Shift amount set"
                         << "\n");
@@ -491,21 +510,21 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate x * (2 ^ -shift_amt)
         y_update = builder.CreateAShr(
-            builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value), shift_amt);
+            x_value_load, shift_amt, "y_upd_1_loop2");
 
         LLVM_DEBUG(dbgs() << "y_update 1 calculated"
                           << "\n");
 
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, y_update), y_update);
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, y_update, "minus_y_upd_1_loop2"), y_update, "y_upd_2_loop2");
 
         LLVM_DEBUG(dbgs() << "y_update 2 calculated"
                           << "\n");
 
         // y_{k+1} = y_k + y_update. Set to temp value since we will need to use y next.
         y_update = builder.CreateAdd(
-            builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), y_update);
+            y_value_load, y_update, "y_upd_3_loop2");
 
         LLVM_DEBUG(dbgs() << "y_update 3 calculated"
                           << "\n");
@@ -516,21 +535,21 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate y * (2 ^ -shift_amt)
         x_update = builder.CreateAShr(
-            builder.CreateLoad(getElementTypeFromValuePointer(y_value.value), y_value.value), shift_amt);
+            y_value_load, shift_amt, "x_upd_1_loop2");
 
         LLVM_DEBUG(dbgs() << "x_update 1 calculated"
                           << "\n");
 
         // Calculate (update_sign > 0 ? -(y - y * (2 ^ -shift_amt)) : (y - y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, x_update), x_update);
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, x_update, "minus_x_upd_1_loop2"), x_update, "x_upd_2_loop2");
 
         LLVM_DEBUG(dbgs() << "x_update 2 calculated"
                           << "\n");
 
         // x_{k+1} = x_k + x_update
         x_update =
-            builder.CreateAdd(x_update, builder.CreateLoad(getElementTypeFromValuePointer(x_value.value), x_value.value));
+            builder.CreateAdd(x_value_load, x_update, "x_upd_3_loop2");
 
         LLVM_DEBUG(dbgs() << "x_update 3 calculated"
                           << "\n");
@@ -545,12 +564,17 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       LLVM_DEBUG(dbgs() << "x and y updated"
                         << "\n");
 
+      /*
+        The two parts where we update z and increment the counter are identical for the negative and positive loops and could theoretically be made into a single subroutine.
+        However, we want to avoid checking where we are each time, so we duplicate the code.
+      */
+
       {
         // Update z (= arg)
 
         // Calculate arctanh_2power[i]
         Value *z_update = builder.CreateGEP(getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
-                                            {zero_arg_internal, builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator)});
+                                            {zero_arg_wide, iterator_value}, "arctanh_2power_i_pointer_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update: ");
         z_update->print(dbgs(), true);
@@ -559,27 +583,27 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         LLVM_DEBUG(dbgs() << "z_update 1 calculated"
                           << "\n");
 
-        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update);
+        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "arctanh_2power_i_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update 2 calculated"
                           << "\n");
 
         z_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_internal, z_update), z_update);
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_arctanh_2power_i_loop2"), z_update, "arg_update_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update 3 calculated"
                           << "\n");
 
         builder.CreateStore(
-            builder.CreateAdd(z_update, builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value)), arg_value);
+            builder.CreateAdd(z_update, arg_value_load, "arg_increment_loop1"), arg_value);
 
         LLVM_DEBUG(dbgs() << "z_update stored"
                           << "\n");
       }
 
       // i++
-      builder.CreateStore(builder.CreateSub(builder.CreateLoad(getElementTypeFromValuePointer(i_iterator), i_iterator),
-                                            ConstantInt::get(int_type_small, 1)),
+      builder.CreateStore(builder.CreateSub(iterator_value,
+                                            ConstantInt::get(int_type_small, 1), "iterator_value_next_loop1"),
                           i_iterator);
       builder.CreateBr(check_loop_negatives);
 
@@ -607,7 +631,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   arg_value->print(dbgs(), true);
   LLVM_DEBUG(dbgs() << "\n");
 
-  auto ret = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value);
+  auto ret = builder.CreateLoad(getElementTypeFromValuePointer(arg_value), arg_value, "arg_value_final");
 
   LLVM_DEBUG(dbgs() << "ret: ");
   ret->print(dbgs(), true);
@@ -615,7 +639,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   // Shift right the result to realign the fractional part
   // builder.CreateLShr(arg_value, internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt(), "output");
-  arg_value = builder.CreateLShr(ret, ConstantInt::get(int_type, internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), "output");
+  arg_value = builder.CreateLShr(ret, ConstantInt::get(int_type, internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), "arg_value_final_shifted");
 
   LLVM_DEBUG(dbgs() << "arg_value after shift: ");
   ret->print(dbgs(), true);
@@ -624,7 +648,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   // Allocate return value
   // Value *return_value = builder.CreateAlloca(int_type_small, nullptr, "return_value");
 
-  arg_value = builder.CreateTrunc(ret, int_type_small, "trunc_arg");
+  arg_value = builder.CreateTrunc(ret, int_type_small, "output");
   LLVM_DEBUG(dbgs() << "arg_value: ");
   arg_value->print(dbgs(), true);
   LLVM_DEBUG(dbgs() << "\n");
