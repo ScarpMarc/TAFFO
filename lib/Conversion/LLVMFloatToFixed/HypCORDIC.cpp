@@ -176,14 +176,14 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                                                  TaffoMath::TABLELENGHT);
 
     LLVM_DEBUG(dbgs() << "ArrayType  " << arctanhArrayType << "\n");
-    auto arctanConstArray = llvm::ConstantArray::get(
+    auto arctanhConstArray = llvm::ConstantArray::get(
         arctanhArrayType, llvm::ArrayRef<llvm::Constant *>(arctanh_2power.value));
-    LLVM_DEBUG(dbgs() << "ConstantDataArray tmp2 " << arctanConstArray << "\n");
+    LLVM_DEBUG(dbgs() << "ConstantDataArray tmp2 " << arctanhConstArray << "\n");
     auto alignement_arctanh =
         dataLayout.getPrefTypeAlignment(arctanh_2power.value[0]->getType());
     auto arctan_g =
         TaffoMath::createGlobalConst(M, "arctanh_g." + std::to_string(internal_fxpt.scalarFracBitsAmt()), arctanhArrayType,
-                                     arctanConstArray, alignement_arctanh);
+                                     arctanhConstArray, alignement_arctanh);
 
     pointer_to_arctanh_array = builder.CreateAlloca(arctanhArrayType, nullptr, "arctanh_array");
     pointer_to_arctanh_array->setAlignment(llvm::Align(alignement_arctanh));
@@ -191,8 +191,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateMemCpy(
         pointer_to_arctanh_array, llvm::Align(alignement_arctanh), arctan_g, llvm::Align(alignement_arctanh),
         TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
-    LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table"
-                      << "\n");
+    LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table. Copied " << TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3) << " bytes\n");
   }
 
   BasicBlock *init = BasicBlock::Create(cont, "init", newfs);
@@ -412,8 +411,9 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         // Update z (= arg)
 
         // Calculate arctanh_2power[i]
-        Value *z_update = builder.CreateGEP(getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
-                                            {zero_arg_wide, iterator_value}, "arctanh_2power_i_pointer_loop1");
+        Value *z_update = builder.CreateGEP(
+            getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
+            {zero_arg_narrow, iterator_value}, "atanh_2pwr_i_ptr_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update: ");
         z_update->print(dbgs(), true);
@@ -422,13 +422,13 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         LLVM_DEBUG(dbgs() << "z_update 1 calculated"
                           << "\n");
 
-        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "arctanh_2power_i_loop1");
+        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "atanh_2pwr_i_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update 2 calculated"
                           << "\n");
 
         z_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_arctanh_2power_i_loop1"), z_update, "arg_update_loop1");
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_atanh_2pwr_i_loop1"), z_update, "arg_update_loop1");
 
         LLVM_DEBUG(dbgs() << "z_update 3 calculated"
                           << "\n");
@@ -574,7 +574,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate arctanh_2power[i]
         Value *z_update = builder.CreateGEP(getElementTypeFromValuePointer(pointer_to_arctanh_array), pointer_to_arctanh_array,
-                                            {zero_arg_wide, iterator_value}, "arctanh_2power_i_pointer_loop2");
+                                            {zero_arg_narrow, iterator_value}, "atanh_2pwr_i_ptr_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update: ");
         z_update->print(dbgs(), true);
@@ -583,13 +583,13 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         LLVM_DEBUG(dbgs() << "z_update 1 calculated"
                           << "\n");
 
-        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "arctanh_2power_i_loop2");
+        z_update = builder.CreateLoad(getElementTypeFromValuePointer(z_update), z_update, "atanh_2pwr_i_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update 2 calculated"
                           << "\n");
 
         z_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_arctanh_2power_i_loop2"), z_update, "arg_update_loop2");
+            update_sign_greater_zero, builder.CreateSub(zero_arg_wide, z_update, "minus_atanh_2pwr_i_loop2"), z_update, "arg_update_loop2");
 
         LLVM_DEBUG(dbgs() << "z_update 3 calculated"
                           << "\n");

@@ -61,12 +61,12 @@ const double zero = 0.0f;
 const double one = 1.0f;
 const double minus_one = -1.0f;
 
+/// Total number of iterations
+constexpr int cordic_exp_total_iterations = TABLELENGHT;
 /// The number of negative iterations for range expansion in the exp CORDIC algorithm
 const int cordic_exp_negative_iterations = 6;
 /// The number of positive iterations for the exp CORDIC algorithm
-const int cordic_exp_positive_iterations = 50;
-/// Total number of iterations
-constexpr int cordic_exp_total_iterations = cordic_exp_positive_iterations - cordic_exp_negative_iterations;
+const int cordic_exp_positive_iterations = cordic_exp_total_iterations-cordic_exp_negative_iterations;
 /// Width of the extended, internal representation for the exp CORDIC algorithm
 const unsigned int cordic_exp_internal_width = 64;
 /// Fractional part of the internal representation for the exp CORDIC algorithm
