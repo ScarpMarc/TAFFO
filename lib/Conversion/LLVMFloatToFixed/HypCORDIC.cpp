@@ -602,8 +602,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       }
 
       // i++
-      builder.CreateStore(builder.CreateSub(iterator_value,
-                                            ConstantInt::get(int_type_small, 1), "iterator_value_next_loop1"),
+      builder.CreateStore(builder.CreateAdd(iterator_value,
+                                            ConstantInt::get(int_type_small, 1), "iterator_value_next_loop2"),
                           i_iterator);
       builder.CreateBr(check_loop_positives);
 
