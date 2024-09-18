@@ -18,7 +18,7 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <string>
 #include <unordered_set>
-
+#include "HypCORDIC.h"
 
 #define DEBUG_TYPE "taffo-conversion"
 
