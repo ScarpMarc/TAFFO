@@ -92,7 +92,8 @@ inline constexpr double compute_An_inv(const double &m, const double &n)
 
   double prod_3 = std::sqrt(1.0 - std::pow(2.0, -2 * 4)) * std::sqrt(1.0 - std::pow(2.0, -2 * 40)) * std::sqrt(1.0 - std::pow(2.0, -2 * 4));
 
-  return 1.0 / (prod_1 * prod_2 * prod_3);
+  //return 1.0 / (prod_1 * prod_2 * prod_3);
+  return 1.0 / (prod_1 * prod_2);
 }
 
 /**

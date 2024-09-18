@@ -308,7 +308,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       // sign = arg >= 0 ? 1 : -1; 
       // Shift right until we get the most significant bit only
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_greater_zero_loop2"),
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_is_negative_loop2"),
           ConstantInt::get(int_type_wide, -1), ConstantInt::get(int_type_wide, 1), "update_sign_loop2");
 
       // update_sign > 0 ?
@@ -316,8 +316,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign_narrow = builder.CreateSelect(
-          builder.CreateICmpSGE(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_greater_zero_narrow_loop2"),
-          ConstantInt::get(int_type_narrow, 1), ConstantInt::get(int_type_narrow, -1), "update_sign_narrow_loop2");
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_is_negative_narrow_loop2"),
+          ConstantInt::get(int_type_narrow, -1), ConstantInt::get(int_type_narrow, 1), "update_sign_narrow_loop2");
       // update_sign > 0 ?
       auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow_loop2");
 
@@ -500,7 +500,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       // sign = arg >= 0 ? 1 : -1; 
       // Shift right until we get the most significant bit only
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_greater_zero_loop2"),
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_is_negative_loop2"),
           ConstantInt::get(int_type_wide, -1), ConstantInt::get(int_type_wide, 1), "update_sign_loop2");
 
       // update_sign > 0 ?
@@ -508,8 +508,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign_narrow = builder.CreateSelect(
-          builder.CreateICmpSGE(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_greater_zero_narrow_loop2"),
-          ConstantInt::get(int_type_narrow, 1), ConstantInt::get(int_type_narrow, -1), "update_sign_narrow_loop2");
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_is_negative_narrow_loop2"),
+          ConstantInt::get(int_type_narrow, -1), ConstantInt::get(int_type_narrow, 1), "update_sign_narrow_loop2");
       // update_sign > 0 ?
       auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow_loop2");
 
