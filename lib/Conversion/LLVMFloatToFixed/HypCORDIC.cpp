@@ -154,6 +154,13 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       arctanh_2power;
   llvm::AllocaInst *pointer_to_arctanh_array = nullptr;
 
+  // handle unsigned arg
+  if (!fxparg.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_narrow, 1), "unsigned_arg_shifted"), arg_ptr);
+    fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
+    fxparg.scalarIsSigned() = true;
+  }
+
   if (!MathZFlag) {
     for (int i = 0; i < TaffoMath::TABLELENGHT; i++) {
       LLVM_DEBUG(dbgs() << "Element " << i << ":\n");
@@ -201,12 +208,6 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                     << "\n");
   // arg.value = arg_ptr;
   BasicBlock *finalize = BasicBlock::Create(cont, "finalize", newfs);
-  // handle unsigned arg
-  if (!fxparg.scalarIsSigned()) {
-    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_wide, 1)), arg_ptr);
-    fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
-    fxparg.scalarIsSigned() = true;
-  }
 
   LLVM_DEBUG(dbgs() << "fxparg: " << fxparg.scalarBitsAmt() << " frac part: " << fxparg.scalarFracBitsAmt() << " difference: " << fxparg.scalarBitsAmt() - fxparg.scalarFracBitsAmt() << "\n");
 

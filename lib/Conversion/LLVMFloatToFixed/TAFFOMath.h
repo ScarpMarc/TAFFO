@@ -69,8 +69,8 @@ const int cordic_exp_negative_iterations = 6;
 const int cordic_exp_positive_iterations = cordic_exp_total_iterations-cordic_exp_negative_iterations;
 /// Width of the extended, internal representation for the exp CORDIC algorithm
 const unsigned int cordic_exp_internal_width = 64;
-/// Fractional part of the internal representation for the exp CORDIC algorithm
-const unsigned int cordic_exp_internal_width_fractional = 46;
+/// Fractional part of the internal representation for the exp CORDIC algorithm. We estimate we need 22 bits for the integer part + 1 for the sign.
+const unsigned int cordic_exp_internal_width_fractional = 64 - 23;
 
 /**
  * @brief Compute the 1/An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
