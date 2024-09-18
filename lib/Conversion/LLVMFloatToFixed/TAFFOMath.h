@@ -70,7 +70,7 @@ const int cordic_exp_positive_iterations = cordic_exp_total_iterations-cordic_ex
 /// Width of the extended, internal representation for the exp CORDIC algorithm
 const unsigned int cordic_exp_internal_width = 64;
 /// Fractional part of the internal representation for the exp CORDIC algorithm
-const unsigned int cordic_exp_internal_width_fractional = 48;
+const unsigned int cordic_exp_internal_width_fractional = 46;
 
 /**
  * @brief Compute the 1/An constant for the exp CORDIC algorithm. m is expected to be negative, n positive.
@@ -92,7 +92,7 @@ inline constexpr double compute_An_inv(const double &m, const double &n)
 
   double prod_3 = std::sqrt(1.0 - std::pow(2.0, -2 * 4)) * std::sqrt(1.0 - std::pow(2.0, -2 * 40)) * std::sqrt(1.0 - std::pow(2.0, -2 * 4));
 
-  return 1.0 / prod_1 * prod_2 * prod_3;
+  return 1.0 / (prod_1 * prod_2 * prod_3);
 }
 
 /**

@@ -116,30 +116,22 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   Value *i_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "i_ptr");
 
-  TaffoMath::pair_ftp_value<llvm::Constant *> kopp(internal_fxpt);
   TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr_wide(internal_fxpt);
   TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr_narrow(fxpret);
   TaffoMath::pair_ftp_value<llvm::Constant *> An_ptr(internal_fxpt);
 
-  LLVM_DEBUG(dbgs() << "Initialising variables. 1/An_ptr=" << TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations)
+  LLVM_DEBUG(dbgs() << "Initialising variables. 1/An_ptr=" << TaffoMath::compute_An_inv(TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations)
                     << "\n");
 
-  bool kopp_created = TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::Kopp, internal_fxpt, kopp.value, kopp.fpt);
   TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::zero, internal_fxpt, zero_ptr_wide.value, zero_ptr_wide.fpt);
   TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::zero, fxpret, zero_ptr_narrow.value, zero_ptr_narrow.fpt);
   TaffoMath::createFixedPointFromConst(
-      cont, ref, TaffoMath::compute_An_inv(-TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), internal_fxpt, An_ptr.value, An_ptr.fpt);
+      cont, ref, TaffoMath::compute_An_inv(TaffoMath::cordic_exp_negative_iterations, TaffoMath::cordic_exp_positive_iterations), internal_fxpt, An_ptr.value, An_ptr.fpt);
 
   std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
   std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
-
-  if (kopp_created)
-    kopp.value = TaffoMath::createGlobalConst(
-        M, "kopp" + S_int_point, kopp.fpt.scalarToLLVMType(cont), kopp.value,
-        dataLayout.getPrefTypeAlignment(kopp.fpt.scalarToLLVMType(cont)));
 
   zero_ptr_wide.value = TaffoMath::createGlobalConst(
       M, "zero_ptr_wide" + S_int_point, zero_ptr_wide.fpt.scalarToLLVMType(cont), zero_ptr_wide.value,
@@ -313,19 +305,21 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       auto x_value = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_curr_loop1");
       auto y_value = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_curr_loop1");
 
-      // sign = arg >= 0 ? 1 : -1;
+      // sign = arg >= 0 ? 1 : -1; 
+      // Shift right until we get the most significant bit only
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGE(arg_value_wide, zero_value_wide, "arg_greater_zero_loop1"),
-          ConstantInt::get(int_type_wide, 1), ConstantInt::get(int_type_wide, -1), "update_sign_loop1");
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_greater_zero_loop2"),
+          ConstantInt::get(int_type_wide, -1), ConstantInt::get(int_type_wide, 1), "update_sign_loop2");
+
       // update_sign > 0 ?
-      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_value_wide, "update_sign_greater_zero_loop1");
+      auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_value_wide, "update_sign_greater_zero_loop2");
 
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign_narrow = builder.CreateSelect(
-          builder.CreateICmpSGE(arg_value_narrow, zero_value_narrow, "arg_greater_zero_narrow_loop1"),
-          ConstantInt::get(int_type_narrow, 1), ConstantInt::get(int_type_narrow, -1), "update_sign_narrow_loop1");
+          builder.CreateICmpSGE(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_greater_zero_narrow_loop2"),
+          ConstantInt::get(int_type_narrow, 1), ConstantInt::get(int_type_narrow, -1), "update_sign_narrow_loop2");
       // update_sign > 0 ?
-      auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow_loop1");
+      auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow_loop2");
 
       LLVM_DEBUG(dbgs() << "Sign greater than zero set"
                         << "\n");
@@ -360,7 +354,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_value_wide, y_update, "minus_y_upd_2_loop1"), y_update, "y_upd_3_loop1");
+            update_sign_greater_zero, y_update, builder.CreateSub(zero_value_wide, y_update, "minus_y_upd_2_loop1"),  "y_upd_3_loop1");
 
         LLVM_DEBUG(dbgs() << "y_update 3 calculated"
                           << "\n");
@@ -392,7 +386,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate (update_sign > 0 ? -(y - y * (2 ^ -shift_amt)) : (y - y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_value_wide, x_update, "minus_x_upd_2_loop1"), x_update, "x_upd_3_loop1");
+            update_sign_greater_zero,  x_update,builder.CreateSub(zero_value_wide, x_update, "minus_x_upd_2_loop1"), "x_upd_3_loop1");
 
         LLVM_DEBUG(dbgs() << "x_update 3 calculated"
                           << "\n");
@@ -503,16 +497,18 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       auto y_value = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_curr_loop2");
 
 
-      // sign = arg >= 0 ? 1 : -1;
+      // sign = arg >= 0 ? 1 : -1; 
+      // Shift right until we get the most significant bit only
       Value *update_sign = builder.CreateSelect(
-          builder.CreateICmpSGE(arg_value_wide, zero_value_wide, "arg_greater_zero_loop2"),
-          ConstantInt::get(int_type_wide, 1), ConstantInt::get(int_type_wide, -1), "update_sign_loop2");
+          builder.CreateICmpSGT(builder.CreateLShr(arg_value_wide, int_type_wide->getScalarSizeInBits() - 1, "arg_value_wide_most_sig_bit"), zero_value_wide, "arg_greater_zero_loop2"),
+          ConstantInt::get(int_type_wide, -1), ConstantInt::get(int_type_wide, 1), "update_sign_loop2");
+
       // update_sign > 0 ?
       auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_value_wide, "update_sign_greater_zero_loop2");
 
       // sign = arg >= 0 ? 1 : -1;
       Value *update_sign_narrow = builder.CreateSelect(
-          builder.CreateICmpSGE(arg_value_narrow, zero_value_narrow, "arg_greater_zero_narrow_loop2"),
+          builder.CreateICmpSGE(builder.CreateLShr(arg_value_narrow, int_type_narrow->getScalarSizeInBits() - 1, "arg_value_narrow_most_sig_bit"), zero_value_narrow, "arg_greater_zero_narrow_loop2"),
           ConstantInt::get(int_type_narrow, 1), ConstantInt::get(int_type_narrow, -1), "update_sign_narrow_loop2");
       // update_sign > 0 ?
       auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow_loop2");
@@ -536,7 +532,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate (update_sign > 0 ? -(x - x * (2 ^ -shift_amt)) : (x - x * (2 ^ -shift_amt)));
         y_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_value_wide, y_update, "minus_y_upd_1_loop2"), y_update, "y_upd_2_loop2");
+            update_sign_greater_zero, y_update, builder.CreateSub(zero_value_wide, y_update, "minus_y_upd_1_loop2"), "y_upd_2_loop2");
 
         LLVM_DEBUG(dbgs() << "y_update 2 calculated"
                           << "\n");
@@ -561,7 +557,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // Calculate (update_sign > 0 ? -(y * (2 ^ -shift_amt)) : (y * (2 ^ -shift_amt)));
         x_update = builder.CreateSelect(
-            update_sign_greater_zero, builder.CreateSub(zero_value_wide, x_update, "minus_x_upd_1_loop2"), x_update, "x_upd_2_loop2");
+            update_sign_greater_zero, x_update, builder.CreateSub(zero_value_wide, x_update, "minus_x_upd_1_loop2"),  "x_upd_2_loop2");
 
         LLVM_DEBUG(dbgs() << "x_update 2 calculated"
                           << "\n");
