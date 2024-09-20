@@ -338,12 +338,18 @@ From an IR perspective, we immediately jump to the next special case.
   LLVM_DEBUG(dbgs() << "Initialising variables. 1/An_ptr=" << flttofix::compute_An_inv(flttofix::cordic_exp_negative_iterations, flttofix::cordic_exp_positive_iterations)
                     << "\n");
 
-  TaffoMath::createFixedPointFromConst(
+  bool zero_ptr_wide_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::zero, internal_fxpt, zero_ptr_wide.value, zero_ptr_wide.fpt);
-  TaffoMath::createFixedPointFromConst(
+  bool zero_ptr_narrow_created = TaffoMath::createFixedPointFromConst(
       cont, ref, TaffoMath::zero, fxpret, zero_ptr_narrow.value, zero_ptr_narrow.fpt);
-  TaffoMath::createFixedPointFromConst(
+  bool An_ptr_created = TaffoMath::createFixedPointFromConst(
       cont, ref, flttofix::compute_An_inv(flttofix::cordic_exp_negative_iterations, flttofix::cordic_exp_positive_iterations), internal_fxpt, An_ptr.value, An_ptr.fpt);
+
+  if (!(zero_ptr_wide_created && zero_ptr_narrow_created && An_ptr_created)) {
+    LLVM_DEBUG(dbgs() << "===== ERROR: Could not create one or more of the initialisation constants\n");
+    llvm_unreachable("Could not create one or more of the initialisation constants. Exp cannot continue.");
+    return false;
+  }
 
   zero_ptr_wide.value = TaffoMath::createGlobalConst(
       M, "zero_ptr_wide" + S_int_point, zero_ptr_wide.fpt.scalarToLLVMType(cont), zero_ptr_wide.value,
@@ -370,8 +376,16 @@ From an IR perspective, we immediately jump to the next special case.
     arctanh_2power.fpt.push_back(flttofix::FixedPointType(fxparg));
     Constant *tmp = nullptr;
     auto &current_fpt = arctanh_2power.fpt.front();
-    TaffoMath::createFixedPointFromConst(
+    bool this_value_created = TaffoMath::createFixedPointFromConst(
         cont, ref, flttofix::arctanh_2power[i], fxparg, tmp, current_fpt);
+
+    if (!this_value_created) {
+      LLVM_DEBUG(dbgs() << "===== ERROR: Could not create one the " << i << "th element of the arctanh table\n");
+      std::string err_msg = "Could not create one the " + std::to_string(i) + "th element of the arctanh table. Exp cannot continue.";
+      llvm_unreachable(err_msg.c_str());
+      return false;
+    }
+
     arctanh_2power.value.push_back(tmp);
     LLVM_DEBUG(dbgs() << "\n");
   }
