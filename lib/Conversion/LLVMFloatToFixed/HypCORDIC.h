@@ -45,6 +45,8 @@ namespace flttofix
  */
 bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 
+bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
+
 /**
  * @brief Generates the lookup table for the exp.
  * 
