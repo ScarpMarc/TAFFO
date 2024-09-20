@@ -47,27 +47,6 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 
 bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 
-/**
- * @brief Generates the lookup table for the exp.
- * 
- * Boundaries are set by @ref cordic_exp_min_exponent and @ref cordic_exp_max_exponent.
- */
-Value *generateExpLUT(FloatToFixed *ref, Function *newfs, FixedPointType &fxptype,
-                      llvm::IRBuilder<> &builder);
-
-/**
- * Minimum exponent for the exp CORDIC algorithm when computing the table.
- * 
- * Has no effect in @ref createExp(), but only in @ref generateExpLUT().
- */ 
-const double cordic_exp_min_exponent = -15.0;
-/**
- * Maximum exponent for the exp CORDIC algorithm when computing the table.
- * 
- * Has no effect in @ref createExp(), but only in @ref generateExpLUT().
- */ 
-const double cordic_exp_max_exponent = 15.0;
-
 /// Total number of iterations for the exp CORDIC algorithm
 constexpr int cordic_exp_total_iterations = TaffoMath::TABLELENGHT;
 /// The number of negative iterations for range expansion in the exp CORDIC algorithm
@@ -78,6 +57,11 @@ const int cordic_exp_positive_iterations = cordic_exp_total_iterations - cordic_
 const int cordic_exp_internal_width = 64;
 /// Fractional part of the internal representation for the exp CORDIC algorithm. We estimate we need 22 bits for the integer part + 1 for the sign.
 const int cordic_exp_internal_width_fractional = 64 - 23;
+/// The constant e
+const double e = 2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427;
+/// The constant e^(-1)
+const double e_inv = 0.3678794411714423215955237701614608674458111310317678345078368016974614957448998033571472743459196437;
+
 
 /// Compute the 1/An constant for the exp CORDIC algorithm. Both m and n are expected to be positive.
 constexpr double compute_An_inv(const int &m, const int &n)

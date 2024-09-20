@@ -14,7 +14,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   SinCos.cpp
   TAFFOMath.cpp
   ArcSinCos.cpp
-  HypCORDIC.cpp
+  expCORDIC.cpp
   LogCordic.cpp
 
   ADDITIONAL_HEADERS
@@ -22,6 +22,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   LLVMFloatToFixedPass.h
   SinCos.h
   TAFFOMath.h
+  HypCORDIC.h
 
 )
 target_link_libraries(obj.${SELF} PUBLIC
