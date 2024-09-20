@@ -556,6 +556,18 @@ bool FloatToFixed::convertLibmFunction(
     return createExp(this, NewFunc, OldFunc);
   }
 
+  if(taffo::start_with(fName, "log10")) {
+    return createLog10(this, NewFunc, OldFunc);
+  }
+
+  if(taffo::start_with(fName, "log2")) {
+    return createLog2(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "log1p")) {
+    return createLog(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "log")) {
     return createLog(this, NewFunc, OldFunc);
   }
