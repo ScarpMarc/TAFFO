@@ -544,6 +544,10 @@ bool FloatToFixed::convertLibmFunction(
     return createSinCos(this, NewFunc, OldFunc);
   }
 
+  if(taffo::start_with(fName, "tan")) {
+    return createTan(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "asin")) {
     return createASin(this, NewFunc, OldFunc);
   }
