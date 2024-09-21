@@ -19,6 +19,7 @@
 #include <string>
 #include <unordered_set>
 #include "HypCORDIC.h"
+#include "CordicSqrt.h"
 
 #define DEBUG_TYPE "taffo-conversion"
 
@@ -544,6 +545,10 @@ bool FloatToFixed::convertLibmFunction(
     return createSinCos(this, NewFunc, OldFunc);
   }
 
+  if(taffo::start_with(fName, "tan")) {
+    return createTan(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "asin")) {
     return createASin(this, NewFunc, OldFunc);
   }
@@ -554,6 +559,10 @@ bool FloatToFixed::convertLibmFunction(
 
   if (taffo::start_with(fName, "exp")) {
     return createExp(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "sqrt")) {
+    return createSqrt(this, NewFunc, OldFunc);
   }
 
   if(taffo::start_with(fName, "log10")) {
