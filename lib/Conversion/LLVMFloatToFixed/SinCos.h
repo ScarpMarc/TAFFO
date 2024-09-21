@@ -21,4 +21,6 @@ void fixrangeSinCos(FloatToFixed *ref, llvm::Function *oldf, FixedPointType &fxp
 
 bool createSinCos(FloatToFixed * ref,  llvm::Function *newfs, llvm::Function *oldf);
 
+bool createTan(FloatToFixed * ref,  llvm::Function *newfs, llvm::Function *oldf);
+
 }
