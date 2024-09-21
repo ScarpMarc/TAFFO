@@ -11,7 +11,7 @@ namespace TaffoMath
 //  with this code even a function like cosplayer is matched
 static bool isSupportedLibmFunction(llvm::Function *F, bool enabled = false)
 {
-  static const auto names = llvm::SmallVector<std::string, 17>({"sin", "cos", "_ZSt3cos", "_ZSt3sin", "asin", "acos", "abs", "fabsf", "ceil", "trunc", "copysign", "floor", "exp", "log", "log10", "log2", "log1p"});
+  static const auto names = llvm::SmallVector<std::string, 17>({"sin", "cos", "_ZSt3cos", "_ZSt3sin", "asin", "acos", "abs", "fabsf", "ceil", "trunc", "copysign", "floor", "exp", "log", "log10", "log2", "log1p", "sqrt"});
   for (auto &name : names) {
     if (F->getName().startswith(name)) {
       return true && enabled;
