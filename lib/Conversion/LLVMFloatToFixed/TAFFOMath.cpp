@@ -2,6 +2,7 @@
 #include "ArcSinCos.h"
 #include "HypCORDIC.h"
 #include "SinCos.h"
+#include "CordicSqrt.h"
 #include "TaffoMathUtil.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
@@ -573,7 +574,11 @@ bool FloatToFixed::convertLibmFunction(
     return createACos(this, NewFunc, OldFunc);
   }
 
-  // Exp and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  // Exp, expm1 and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  if (taffo::start_with(fName, "expm1")) {
+    return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Expm1);
+  }
+
   if (taffo::start_with(fName, "exp2")) {
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
   }
