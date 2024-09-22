@@ -56,21 +56,9 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
 
-  /*
-    Define LLVM integer types that will hold our variables.
-    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
-  */
-  auto int_type = fxparg.scalarToLLVMType(cont);
-  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
-  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
-  int_type->print(dbgs(), true);
-  LLVM_DEBUG(dbgs() << "\n");
-
-  // Generate strings for constants names
-  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
-  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
-
   // ----------------------------------------------------
+
+  auto int_type = fxparg.scalarToLLVMType(cont);
 
   // Pointer to the argument
   Value *arg_ptr = builder.CreateAlloca(int_type, nullptr, "arg");
@@ -87,6 +75,20 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
     fxparg.scalarIsSigned() = true;
   }
+
+  /*
+    Define LLVM integer types that will hold our variables.
+    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
+  */
+  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
+  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
+  int_type->print(dbgs(), true);
+  LLVM_DEBUG(dbgs() << "\n");
+
+  // Generate strings for constants names
+  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
+  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
+
 
   auto truefxpret = fxpret;
   /*
@@ -116,6 +118,9 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   // In case we did not need to return a special value, we will cast the result to the return type here
   BasicBlock *finalize = BasicBlock::Create(cont, "finalize", newfs);
+
+  // Return block
+  BasicBlock *return_point = BasicBlock::Create(cont, "Special", newfs);
 
   // End block, which returns the result
   BasicBlock *end = BasicBlock::Create(cont, "end", newfs);
@@ -218,9 +223,51 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
   LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table. Copied " << TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3) << " bytes\n");
 
+  // If the argument is negative, return a special value
+  {
+    // Shift right arg by 1
+    auto arg_value = builder.CreateAShr(
+        builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value"),
+        ConstantInt::get(int_type, 1),
+        "arg_value_shr_1");
+    // Store arg_value in arg_ptr
+    builder.CreateStore(arg_value, arg_ptr);
+
+    // Create two blocks: one for the negative case (BTrue) and one for the positive or zero case (BFalse)
+    BasicBlock *BTrue = BasicBlock::Create(cont, "Special", newfs);
+    BasicBlock *BFalse = BasicBlock::Create(cont, "body", newfs);
+
+    // If the called function is log1p add 1 to the argument
+    if (isLogp1) {
+      arg_value = builder.CreateAdd(
+          arg_value,
+          builder.CreateLoad(getElementTypeFromValuePointer(one.value), one.value, "one"));
+      builder.CreateStore(arg_value, arg_ptr);
+    }
+
+    // Create a conditional branch based on the sign check
+    Value *check_sign = builder.CreateICmpSLE(
+        arg_value,                    // Confronta l'argomento caricato
+        ConstantInt::get(int_type, 0) // Confronta con zero per verificare il segno negativo
+    );
+
+    builder.CreateCondBr(check_sign, BTrue, BFalse);
+    // If negative, handle in BTrue
+    builder.SetInsertPoint(BTrue);
+    // Calculate the value of the most negative number (-2^(n-1)) for a signed integer
+    Value *negative_max = ConstantInt::get(int_type, APInt::getSignedMinValue(truefxpret.scalarBitsAmt()));
+    // Store the negative max value in z_ptr.value
+    builder.CreateStore(negative_max, z_ptr.value);
+    // Jump to the return block (return_point)
+    builder.CreateBr(return_point);
+    // Handle the non-negative case (BFalse)
+    builder.SetInsertPoint(BFalse);
+  }
+
+
   // calculate log
 
-  LLVM_DEBUG(dbgs() << "Starting ln routine"
+  LLVM_DEBUG(dbgs() << "Starting log routine"
                     << "\n");
 
   auto zero_arg_value = builder.CreateLoad(getElementTypeFromValuePointer(zero_arg.value), zero_arg.value, "zero_arg");
@@ -242,15 +289,6 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   builder.CreateStore(builder.CreateSub(arg_value, one_value), y_ptr.value);
   // z=0
   builder.CreateStore(zero_ret_value, z_ptr.value);
-  
-
-  //Calculate log(1+x)
-  if(isLogp1){
-    // x=x+1
-    builder.CreateStore(builder.CreateAdd(builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value), one_value), x_ptr.value);
-    // y=y+1
-    builder.CreateStore(builder.CreateAdd(builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value), one_value), y_ptr.value);
-  }
 
   LLVM_DEBUG(dbgs() << "Initial x y z set"
                     << "\n");
@@ -619,9 +657,10 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value), truefxpret.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), z_ptr.value);
   }
 
+  builder.CreateBr(return_point);
+  builder.SetInsertPoint(return_point);
 
   auto return_value = builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value, "z_value_final");
-
 
   LLVM_DEBUG(dbgs() << "return_value after shift: ");
   return_value->print(dbgs(), true);
@@ -630,6 +669,8 @@ bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   builder.CreateBr(end);
   builder.SetInsertPoint(end);
   builder.CreateRet(return_value);
+  // builder.SetInsertPoint(undefined);
+  // llvm_unreachable("Undefined behavior");
   return true;
 }
 
@@ -666,21 +707,9 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
 
-  /*
-    Define LLVM integer types that will hold our variables.
-    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
-  */
-  auto int_type = fxparg.scalarToLLVMType(cont);
-  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
-  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
-  int_type->print(dbgs(), true);
-  LLVM_DEBUG(dbgs() << "\n");
-
-  // Generate strings for constants names
-  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
-  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
-
   // ----------------------------------------------------
+
+  auto int_type = fxparg.scalarToLLVMType(cont);
 
   // Pointer to the argument
   Value *arg_ptr = builder.CreateAlloca(int_type, nullptr, "arg");
@@ -698,10 +727,25 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     fxparg.scalarIsSigned() = true;
   }
 
+
+  /*
+    Define LLVM integer types that will hold our variables.
+    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
+  */
+  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
+  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
+  int_type->print(dbgs(), true);
+  LLVM_DEBUG(dbgs() << "\n");
+
+  // Generate strings for constants names
+  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
+  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
+
+
   auto truefxpret = fxpret;
   /*
-  The largest arcatanh constant we have to use is about 3.2. Internally, we use the return's type; the problem is that if the return's fixed point type has very few integer bits, we may not have enough to represent the various constants.
-  Thus, we must make sure that we have at least 2 integer bits +1 for the sign
+  The largest arcatanh constant we have to use is about 1.4. Internally, we use the return's type; the problem is that if the return's fixed point type has very few integer bits, we may not have enough to represent the various constants.
+  Thus, we must make sure that we have at least 1 integer bits +1 for the sign
   */
   if ((fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt()) < 2) {
     fxpret = flttofix::FixedPointType(true,
@@ -726,6 +770,9 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   // In case we did not need to return a special value, we will cast the result to the return type here
   BasicBlock *finalize = BasicBlock::Create(cont, "finalize", newfs);
+
+  // Return block
+  BasicBlock *return_point = BasicBlock::Create(cont, "Special", newfs);
 
   // End block, which returns the result
   BasicBlock *end = BasicBlock::Create(cont, "end", newfs);
@@ -828,6 +875,39 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
   LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table. Copied " << TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3) << " bytes\n");
 
+  // If the argument is negative, return a special value
+  {
+    // Shift right arg by 1
+    auto arg_value = builder.CreateAShr(
+        builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value"),
+        ConstantInt::get(int_type, 1),
+        "arg_value_shr_1");
+    // Store arg_value in arg_ptr
+    builder.CreateStore(arg_value, arg_ptr);
+
+    // Create two blocks: one for the negative case (BTrue) and one for the positive or zero case (BFalse)
+    BasicBlock *BTrue = BasicBlock::Create(cont, "Special", newfs);
+    BasicBlock *BFalse = BasicBlock::Create(cont, "body", newfs);
+
+    // Create a conditional branch based on the sign check
+    Value *check_sign = builder.CreateICmpSLE(
+        arg_value,                    // Confronta l'argomento caricato
+        ConstantInt::get(int_type, 0) // Confronta con zero per verificare il segno negativo
+    );
+
+    builder.CreateCondBr(check_sign, BTrue, BFalse);
+    // If negative, handle in BTrue
+    builder.SetInsertPoint(BTrue);
+    // Calculate the value of the most negative number (-2^(n-1)) for a signed integer
+    Value *negative_max = ConstantInt::get(int_type, APInt::getSignedMinValue(truefxpret.scalarBitsAmt()));
+    // Store the negative max value in z_ptr.value
+    builder.CreateStore(negative_max, z_ptr.value);
+    // Jump to the return block (return_point)
+    builder.CreateBr(return_point);
+    // Handle the non-negative case (BFalse)
+    builder.SetInsertPoint(BFalse);
+  }
+
   // calculate log10
 
   LLVM_DEBUG(dbgs() << "Starting ln routine"
@@ -843,6 +923,7 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                     << "\n");
 
   auto one_value = builder.CreateLoad(getElementTypeFromValuePointer(one.value), one.value, "one");
+  // Shift right arg_value by 1
   auto arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value");
 
   // Initialise x y z
@@ -1220,6 +1301,8 @@ bool createLog10(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value), truefxpret.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), z_ptr.value);
   }
 
+  builder.CreateBr(return_point);
+  builder.SetInsertPoint(return_point);
 
   auto return_value = builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value, "z_value_final");
 
@@ -1240,8 +1323,6 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   newfs->deleteBody();
 
   Module *M = oldf->getParent();
-
-  // TODO: sinh cosh exp
 
   // Retrieve context used in later instruction
   llvm::LLVMContext &cont(oldf->getContext());
@@ -1267,19 +1348,7 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
 
-  /*
-    Define LLVM integer types that will hold our variables.
-    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
-  */
   auto int_type = fxparg.scalarToLLVMType(cont);
-  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
-  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
-  int_type->print(dbgs(), true);
-  LLVM_DEBUG(dbgs() << "\n");
-
-  // Generate strings for constants names
-  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
-  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
 
   // ----------------------------------------------------
 
@@ -1299,10 +1368,23 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     fxparg.scalarIsSigned() = true;
   }
 
+  /*
+    Define LLVM integer types that will hold our variables.
+    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
+  */
+  auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 1, fxparg.scalarBitsAmt());
+  LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
+  int_type->print(dbgs(), true);
+  LLVM_DEBUG(dbgs() << "\n");
+
+  // Generate strings for constants names
+  std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
+  std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
+
   auto truefxpret = fxpret;
   /*
-  The largest arcatanh constant we have to use is about 3.2. Internally, we use the return's type; the problem is that if the return's fixed point type has very few integer bits, we may not have enough to represent the various constants.
-  Thus, we must make sure that we have at least 2 integer bits +1 for the sign
+  The largest arcatanh constant we have to use is about 4.6. Internally, we use the return's type; the problem is that if the return's fixed point type has very few integer bits, we may not have enough to represent the various constants.
+  Thus, we must make sure that we have at least 4 integer bits +1 for the sign
   */
   if ((fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt()) < 5) {
     fxpret = flttofix::FixedPointType(true,
@@ -1327,6 +1409,9 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   // In case we did not need to return a special value, we will cast the result to the return type here
   BasicBlock *finalize = BasicBlock::Create(cont, "finalize", newfs);
+
+  // Return block
+  BasicBlock *return_point = BasicBlock::Create(cont, "Special", newfs);
 
   // End block, which returns the result
   BasicBlock *end = BasicBlock::Create(cont, "end", newfs);
@@ -1428,6 +1513,39 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       pointer_to_arctanh_array, llvm::Align(alignement_arctanh), arctan_g, llvm::Align(alignement_arctanh),
       TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3));
   LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table. Copied " << TaffoMath::TABLELENGHT * (int_type->getScalarSizeInBits() >> 3) << " bytes\n");
+
+  // If the argument is negative, return a special value
+  {
+    // Shift right arg by 1
+    auto arg_value = builder.CreateAShr(
+        builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value"),
+        ConstantInt::get(int_type, 1),
+        "arg_value_shr_1");
+    // Store arg_value in arg_ptr
+    builder.CreateStore(arg_value, arg_ptr);
+
+    // Create two blocks: one for the negative case (BTrue) and one for the positive or zero case (BFalse)
+    BasicBlock *BTrue = BasicBlock::Create(cont, "Special", newfs);
+    BasicBlock *BFalse = BasicBlock::Create(cont, "body", newfs);
+
+    // Create a conditional branch based on the sign check
+    Value *check_sign = builder.CreateICmpSLE(
+        arg_value,                    // Confronta l'argomento caricato
+        ConstantInt::get(int_type, 0) // Confronta con zero per verificare il segno negativo
+    );
+
+    builder.CreateCondBr(check_sign, BTrue, BFalse);
+    // If negative, handle in BTrue
+    builder.SetInsertPoint(BTrue);
+    // Calculate the value of the most negative number (-2^(n-1)) for a signed integer
+    Value *negative_max = ConstantInt::get(int_type, APInt::getSignedMinValue(truefxpret.scalarBitsAmt()));
+    // Store the negative max value in z_ptr.value
+    builder.CreateStore(negative_max, z_ptr.value);
+    // Jump to the return block (return_point)
+    builder.CreateBr(return_point);
+    // Handle the non-negative case (BFalse)
+    builder.SetInsertPoint(BFalse);
+  }
 
   // calculate log2
 
@@ -1821,6 +1939,8 @@ bool createLog2(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value), truefxpret.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), z_ptr.value);
   }
 
+  builder.CreateBr(return_point);
+  builder.SetInsertPoint(return_point);
 
   auto return_value = builder.CreateLoad(getElementTypeFromValuePointer(z_ptr.value), z_ptr.value, "z_value_final");
 

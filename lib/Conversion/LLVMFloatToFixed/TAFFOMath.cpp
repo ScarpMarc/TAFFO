@@ -583,6 +583,10 @@ bool FloatToFixed::convertLibmFunction(
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
   }
 
+  if(taffo::start_with(fName, "atan")) {
+    return createATan(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "exp")) {
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp);
   }

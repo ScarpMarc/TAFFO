@@ -5,7 +5,7 @@
 int main(int argc, char *argv[])
 {
   int n = 0;
-  float tmp __attribute((annotate("target('a') scalar(range(0.1, 200))"))) = 0.1f;
+  float tmp __attribute((annotate("target('a') scalar(range(-10, 200))"))) = -10.1f;
 
   for (int i = 0; i < 50; i++)
   {
