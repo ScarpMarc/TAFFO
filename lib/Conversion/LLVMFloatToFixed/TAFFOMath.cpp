@@ -18,8 +18,6 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <string>
 #include <unordered_set>
-#include "HypCORDIC.h"
-#include "CordicSqrt.h"
 
 #define DEBUG_TYPE "taffo-conversion"
 
@@ -545,7 +543,7 @@ bool FloatToFixed::convertLibmFunction(
     return createSinCos(this, NewFunc, OldFunc);
   }
 
-  if(taffo::start_with(fName, "tan")) {
+  if (taffo::start_with(fName, "tan")) {
     return createTan(this, NewFunc, OldFunc);
   }
 
@@ -557,19 +555,24 @@ bool FloatToFixed::convertLibmFunction(
     return createACos(this, NewFunc, OldFunc);
   }
 
+  // Exp and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  if (taffo::start_with(fName, "exp2")) {
+    return createExp(this, NewFunc, OldFunc, true);
+  }
+
   if (taffo::start_with(fName, "exp")) {
-    return createExp(this, NewFunc, OldFunc);
+    return createExp(this, NewFunc, OldFunc, false);
   }
 
   if (taffo::start_with(fName, "sqrt")) {
     return createSqrt(this, NewFunc, OldFunc);
   }
 
-  if(taffo::start_with(fName, "log10")) {
+  if (taffo::start_with(fName, "log10")) {
     return createLog10(this, NewFunc, OldFunc);
   }
 
-  if(taffo::start_with(fName, "log2")) {
+  if (taffo::start_with(fName, "log2")) {
     return createLog2(this, NewFunc, OldFunc);
   }
 
@@ -580,7 +583,6 @@ bool FloatToFixed::convertLibmFunction(
   if (taffo::start_with(fName, "log")) {
     return createLog(this, NewFunc, OldFunc);
   }
-
 
   if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabsf")) {
     return createAbs(this, NewFunc, OldFunc);
@@ -599,7 +601,7 @@ bool FloatToFixed::convertLibmFunction(
   }
 
   if (taffo::start_with(fName, "copysign")) {
-    //return createCopysign(this, NewFunc, OldFunc);
+    // return createCopysign(this, NewFunc, OldFunc);
   }
 
   llvm_unreachable("Function not recognized");
