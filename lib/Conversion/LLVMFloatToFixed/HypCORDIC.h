@@ -10,8 +10,20 @@
 
 namespace flttofix
 {
+
+/// Used in @ref createExp() to determine which function to create
+enum class ExpFunType
+{
+  /// exp function
+  Exp,
+  /// exp2 function, i.e. 2^x
+  Exp2,
+  /// expm1 function, i.e. exp(x) - 1
+  Expm1
+};
+
 /**
- * @brief Handles the exp function.
+ * @brief Handles the exp and exp2 functions.
  *
  * The exp is calculated with the CORDIC algorithm, and relies on the arctanh function which is stored in @ref arctanh_2power.
  * The calculation relies on a series of oscillations which, after some iterations, settle to the desider value.
@@ -19,6 +31,9 @@ namespace flttofix
  * initialise them to the same value, which leads to them ending up at the same value and thus we just return x.
  * The input argument also plays a role in that it oscillates to 0, and its sign is used to decide the sign of the
  * correction that is applied to the internal variables.
+ * 
+ * The exp2 function is calculated the same way, but y is initialised to 0 and the argument has to be multiplied by ln(2).
+ * Also, in case of the exp2 function we must also add together x and y at the end.
  *
  * The value at which we initialise these variables is the (1/An) compile-time constant calculated in @ref compute_An_inv(),
  * which in turn depends on how many range-adjustment iterations
@@ -31,19 +46,19 @@ namespace flttofix
  * we use @ref cordic_exp_internal_width bits in total, with @ref cordic_exp_internal_width_fractional bits for the fractional part.
  * Note that we also need the enhanced precision because in case the exponent is negative, the VRA will allocate few bits for
  * the integer part; however, in these cases the intermediate results will still start at the same magnitude as the positive ones.
- * 
+ *
  * We chose to perform 64 (i.e. TaffoMath::TABLELENGHT) iterations in total; this amount includes the 6 negative ones. Should
  * someone decide to support larger exponents, they should remember to update @ref arctanh_2power along with the rest. See
  * the documentation for that array for more information.
- * 
+ *
  * !!! NOTE !!!
- * The textbook loop goes from -negative_iterations to 0 and then from 1 to positive_iterations. 
- * HOWEVER: we start from 0 go to total_iterations, reading everything from the same table. 
+ * The textbook loop goes from -negative_iterations to 0 and then from 1 to positive_iterations.
+ * HOWEVER: we start from 0 go to total_iterations, reading everything from the same table.
  * Please see the documentation for @ref arctanh_2power.
  *
  * We estimated we need 22 bits for the integer part + 1 for the sign for these internal values.
  */
-bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
+bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const ExpFunType& funcType = ExpFunType::Exp);
 
 bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 
@@ -65,7 +80,8 @@ const int cordic_exp_internal_width_fractional = 64 - 23;
 const double e = 2.718281828459045235360287471352662497757247093699959574966967627724076630353547594571382178525166427;
 /// The constant e^(-1)
 const double e_inv = 0.3678794411714423215955237701614608674458111310317678345078368016974614957448998033571472743459196437;
-
+/// The constant ln(2)
+const double ln2 = 0.6931471805599453094172321214581765680755001343602552541206800094933936219696947156058633269964186875;
 
 /// Compute the 1/An constant for the exp CORDIC algorithm. Both m and n are expected to be positive.
 constexpr double compute_An_inv(const int &m, const int &n)
@@ -90,11 +106,11 @@ constexpr double compute_An_inv(const int &m, const int &n)
 
 /**
  * @brief Table for the exp CORDIC algorithm.
- * 
- * Each item in this array is calculated as follows: 
+ *
+ * Each item in this array is calculated as follows:
  * - for NEGATIVE ITERATIONS (i.e. from - @ref cordic_exp_negative_iterations to  to 0 INCLUSIVE), the value is arctanh(1-2^(-i-2)), i.e. in our case the first one is arctanh(1-2^(-6-2)) = arctanh(1-2^(-8))
  * - for POSITIVE ITERATIONS (i.e. from 1 to @ref cordic_exp_total_iterations), the value is arctanh(2^(-i)), i.e. in our case the first one is arctanh(2^(-1))
- * 
+ *
  * In case you need to add more negative iterations to support larger exponent, you MUST update the following table with the new values. The values we used are reported
  * for your convenience. Please also remember to update @ref cordic_exp_negative_iterations and @ref cordic_exp_positive_iterations accordingly.
  *
@@ -103,8 +119,8 @@ constexpr double compute_An_inv(const int &m, const int &n)
  * This table is meant to be indexed consecutively, hence the iterator should not be reset.
  *
  * Values for negative values are needed for range expansion; they go up to m=-6, which is good for about an exponent of 15.544 instead of about 1.12 for the original algorithm.
- * 
- * Note that with 32 bits, the last values (how many, depends on the fixed point type of the ARGUMENT) will be discretised as 0. 
+ *
+ * Note that with 32 bits, the last values (how many, depends on the fixed point type of the ARGUMENT) will be discretised as 0.
  * This is not a problem, as that means the successive damping iterations will be null; we are just wasting some cycles.
  */
 const double arctanh_2power[TaffoMath::TABLELENGHT] = {
@@ -174,8 +190,8 @@ const double arctanh_2power[TaffoMath::TABLELENGHT] = {
     0.00000000000000002775557561562891351059079170227051493987256024585505637476391240395497127738227315197080349455766764,
     0.00000000000000001387778780781445675529539585113525479717157003073188204684548905049406255621741606226126209968930015,
     0.000000000000000006938893903907228377647697925567627064490196253841485255855686131311748167856696755228436251925837260};
-  
-      const double arctanh_2power_2[TaffoMath::TABLELENGHT] = {
+
+const double arctanh_2power_2[TaffoMath::TABLELENGHT] = {
     // Values for negative iterations
     /* arctanh(1 - 2^-8)/log2 */ 4.498589740468810668652993242695836138462708210067211667280536511191495726781147424630110723730586319793,
     /* arctanh(1 - 2^-7)/log2 */ 3.997176718429428968789062192123805519317956541530941180318559057371864756725182923334881685060571335238,
@@ -243,8 +259,7 @@ const double arctanh_2power[TaffoMath::TABLELENGHT] = {
     0.00000000000000002002141564884323553741192038005053718880269809070411498091961382880544665502844348618479857377077883644};
 
 
-
-  const double arctanh_2power_10[TaffoMath::TABLELENGHT] = {
+const double arctanh_2power_10[TaffoMath::TABLELENGHT] = {
     // Values for negative iterations
     /* arctanh(1 - 2^-8)/log10 */ 1.354210450067356365893301579531472363968220325817811445806818492622631449137939975592468278324533795176,
     /* arctanh(1 - 2^-7)/log10 */ 1.203270090216977585310729451429479656219753180576816860449903330761407512883177399675862886813947634495,
@@ -310,4 +325,5 @@ const double arctanh_2power[TaffoMath::TABLELENGHT] = {
     0.00000000000000002410818666383217776800367942539069112592233084694829262449252964551356808130147454589438139180901504601,
     0.00000000000000001205409333191608888400183971269533627682544527319270980601114416836586655188665396041076894869245416771,
     0.000000000000000006027046665958044442000919856347666977645757617811175339726182002386080590118563218675482081910796171217};
+
 } // namespace flttofix

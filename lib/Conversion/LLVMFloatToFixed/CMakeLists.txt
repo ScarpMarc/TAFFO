@@ -16,6 +16,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   ArcSinCos.cpp
   expCORDIC.cpp
   LogCordic.cpp
+  CordicSqrt.cpp
 
   ADDITIONAL_HEADERS
   FixedPointType.h
@@ -23,6 +24,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   SinCos.h
   TAFFOMath.h
   HypCORDIC.h
+  CordicSqrt.h
 
 )
 target_link_libraries(obj.${SELF} PUBLIC

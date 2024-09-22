@@ -1,7 +1,3 @@
-/*
-    Hyperbolic CORDIC for cosh, sinh, exp...
-*/
-
 #include "HypCORDIC.h"
 #include "TAFFOMath.h"
 #include "llvm/IR/BasicBlock.h"
@@ -19,14 +15,12 @@
 namespace flttofix
 {
 
-bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const ExpFunType &funcType)
 {
   //
   newfs->deleteBody();
 
   Module *M = oldf->getParent();
-
-  // TODO: sinh cosh exp
 
   // Retrieve context used in later instruction
   llvm::LLVMContext &cont(oldf->getContext());
@@ -51,6 +45,8 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   }
 
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
+
+  LLVM_DEBUG(dbgs() << "fxparg: " << fxparg.scalarBitsAmt() << " frac part: " << fxparg.scalarFracBitsAmt() << " difference: " << fxparg.scalarBitsAmt() - fxparg.scalarFracBitsAmt() << "\n");
 
   /*
     Define LLVM integer types that will hold our variables.
@@ -113,6 +109,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   // Some variables we will need to handle special cases.
   // More variables will be declared later.
 
+
   // Pointer to one (for comparison with the argument)
   TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr_arg(fxparg);
   bool one_ptr_arg_created = TaffoMath::createFixedPointFromConst(
@@ -142,23 +139,57 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   // Pointer to e (for returning)
   TaffoMath::pair_ftp_value<llvm::Constant *> e_ptr_arg(fxpret);
-  bool e_ptr_arg_created = TaffoMath::createFixedPointFromConst(
-      cont, ref, flttofix::e, fxpret, e_ptr_arg.value, e_ptr_arg.fpt);
-  if (e_ptr_arg_created)
-    e_ptr_arg.value = TaffoMath::createGlobalConst(
-        M, "e_ptr_arg" + S_arg_point, e_ptr_arg.fpt.scalarToLLVMType(cont), e_ptr_arg.value,
-        dataLayout.getPrefTypeAlignment(e_ptr_arg.fpt.scalarToLLVMType(cont)));
-
+  bool e_ptr_arg_created = false;
   // Pointer to e^-1 (for returning)
   TaffoMath::pair_ftp_value<llvm::Constant *> e_inv_ptr_arg(fxpret);
-  bool e_inv_ptr_arg_created = TaffoMath::createFixedPointFromConst(
-      cont, ref, flttofix::e_inv, fxpret, e_inv_ptr_arg.value, e_inv_ptr_arg.fpt);
-  if (e_inv_ptr_arg_created)
-    e_inv_ptr_arg.value = TaffoMath::createGlobalConst(
-        M, "e_inv_ptr_arg" + S_arg_point, e_inv_ptr_arg.fpt.scalarToLLVMType(cont), e_inv_ptr_arg.value,
-        dataLayout.getPrefTypeAlignment(e_inv_ptr_arg.fpt.scalarToLLVMType(cont)));
+  bool e_inv_ptr_arg_created = false;
 
+  // Pointer to 2 (for returning)
+  TaffoMath::pair_ftp_value<llvm::Constant *> two_ptr_arg(fxpret);
+  bool two_ptr_arg_created = false;
+  // Pointer to 2^-1 (for returning)
+  TaffoMath::pair_ftp_value<llvm::Constant *> two_inv_ptr_arg(fxpret);
+  bool two_inv_ptr_arg_created = false;
+
+  if (funcType == ExpFunType::Exp2) {
+    LLVM_DEBUG(dbgs() << "Creating exp2 constants\n");
+
+    // Pointer to 2 (for returning)
+    two_ptr_arg_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 2.0, fxpret, two_ptr_arg.value, two_ptr_arg.fpt);
+    if (two_ptr_arg_created)
+      two_ptr_arg.value = TaffoMath::createGlobalConst(
+          M, "two_ptr_arg" + S_arg_point, two_ptr_arg.fpt.scalarToLLVMType(cont), two_ptr_arg.value,
+          dataLayout.getPrefTypeAlignment(two_ptr_arg.fpt.scalarToLLVMType(cont)));
+
+    // Pointer to 2^-1 (for returning)
+    two_inv_ptr_arg_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 0.5, fxpret, two_inv_ptr_arg.value, two_inv_ptr_arg.fpt);
+    if (two_inv_ptr_arg_created)
+      two_inv_ptr_arg.value = TaffoMath::createGlobalConst(
+          M, "two_inv_ptr_arg" + S_arg_point, two_inv_ptr_arg.fpt.scalarToLLVMType(cont), two_inv_ptr_arg.value,
+          dataLayout.getPrefTypeAlignment(two_inv_ptr_arg.fpt.scalarToLLVMType(cont)));
+  } else {
+    LLVM_DEBUG(dbgs() << "Creating exp constants\n");
+
+    // Pointer to e (for returning)
+    e_ptr_arg_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, flttofix::e, fxpret, e_ptr_arg.value, e_ptr_arg.fpt);
+    if (e_ptr_arg_created)
+      e_ptr_arg.value = TaffoMath::createGlobalConst(
+          M, "e_ptr_arg" + S_arg_point, e_ptr_arg.fpt.scalarToLLVMType(cont), e_ptr_arg.value,
+          dataLayout.getPrefTypeAlignment(e_ptr_arg.fpt.scalarToLLVMType(cont)));
+
+    // Pointer to e^-1 (for returning)
+    e_inv_ptr_arg_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, flttofix::e_inv, fxpret, e_inv_ptr_arg.value, e_inv_ptr_arg.fpt);
+    if (e_inv_ptr_arg_created)
+      e_inv_ptr_arg.value = TaffoMath::createGlobalConst(
+          M, "e_inv_ptr_arg" + S_arg_point, e_inv_ptr_arg.fpt.scalarToLLVMType(cont), e_inv_ptr_arg.value,
+          dataLayout.getPrefTypeAlignment(e_inv_ptr_arg.fpt.scalarToLLVMType(cont)));
+  }
   LLVM_DEBUG(dbgs() << "Created special constants\n");
+
 
   // ----------------------------------------------------
   // Basic blocks
@@ -191,18 +222,21 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     The solution is to use a "pre" block which we always place: in case we do create the special case, we jump to the "pre" block,
     which then jumps to the special case. In case we do not create the special case, we jump to the next special case directly.
+
+    Also! We must initialise some of these variables later since if their block never gets placed, we will get an error down the line
+    since technically they are never terminated either.
     */
 
-  BasicBlock *checkArgIsZero = BasicBlock::Create(cont, "check_arg_is_zero", newfs);
-  BasicBlock *argIsZero = BasicBlock::Create(cont, "arg_is_zero", newfs);
+  BasicBlock *checkArgIsZero;
+  BasicBlock *argIsZero;
 
   BasicBlock *checkArgIsOne_pre = BasicBlock::Create(cont, "check_arg_is_one_pre", newfs);
-  BasicBlock *checkArgIsOne = BasicBlock::Create(cont, "check_arg_is_one", newfs);
-  BasicBlock *argIsOne = BasicBlock::Create(cont, "arg_is_one", newfs);
+  BasicBlock *checkArgIsOne;
+  BasicBlock *argIsOne;
 
   BasicBlock *checkArgIsMinusOne_pre = BasicBlock::Create(cont, "check_arg_is_minus_one_pre", newfs);
-  BasicBlock *checkArgIsMinusOne = BasicBlock::Create(cont, "check_arg_is_minus_one", newfs);
-  BasicBlock *argIsMinusOne = BasicBlock::Create(cont, "arg_is_minus_one", newfs);
+  BasicBlock *checkArgIsMinusOne;
+  BasicBlock *argIsMinusOne;
 
   BasicBlock *init_pre = BasicBlock::Create(cont, "init_pre", newfs);
 
@@ -216,9 +250,12 @@ From an IR perspective, we immediately jump to the next special case.
 */
   if (!(one_ptr_ret_created)) {
     LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsZero) needs the return constant 1.0 but it was not created successfully.\n");
+    builder.CreateBr(checkArgIsOne_pre);
   } else {
     LLVM_DEBUG(dbgs() << "Create checkArgIsZero"
                       << "\n");
+
+    checkArgIsZero = BasicBlock::Create(cont, "check_arg_is_zero", newfs);
 
     builder.CreateBr(checkArgIsZero);
     builder.SetInsertPoint(checkArgIsZero);
@@ -227,6 +264,8 @@ From an IR perspective, we immediately jump to the next special case.
 
       Value *check = builder.CreateICmpEQ(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_initial"),
                                           ConstantInt::get(int_type_narrow, 0), "arg_is_zero");
+
+      argIsZero = BasicBlock::Create(cont, "arg_is_zero", newfs);
 
       builder.CreateCondBr(check, argIsZero, checkArgIsOne_pre);
 
@@ -245,11 +284,15 @@ From an IR perspective, we immediately jump to the next special case.
        Check whether we successfully created the constant; if not, we calculate the result at runtime.
        From an IR perspective, we immediately jump to the next special case.
       */
-  if (!(one_ptr_arg_created && e_ptr_arg_created)) {
-    LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsOne) needs both the arg constant 1.0 and e, but either one or both was not created successfully.\n");
+  if (((funcType != ExpFunType::Exp) && !(one_ptr_arg_created && e_ptr_arg_created)) || (funcType == ExpFunType::Exp && !(two_ptr_arg_created))) {
+    LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsOne) needs both the arg constant 1.0 and e, or 2.0 for exp2, but either one or both were not created successfully.\n");
+    builder.CreateBr(checkArgIsMinusOne_pre);
   } else {
     LLVM_DEBUG(dbgs() << "Create checkArgIsOne"
                       << "\n");
+    checkArgIsOne = BasicBlock::Create(cont, "check_arg_is_one", newfs);
+    argIsOne = BasicBlock::Create(cont, "arg_is_one", newfs);
+
     builder.CreateBr(checkArgIsOne);
     builder.SetInsertPoint(checkArgIsOne);
     {
@@ -263,7 +306,12 @@ From an IR perspective, we immediately jump to the next special case.
       builder.SetInsertPoint(argIsOne);
       {
         // Copy the result to the return value
-        builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_ptr_arg.value), e_ptr_arg.value), return_value_ptr);
+        if (funcType == ExpFunType::Exp2) {
+          builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(two_ptr_arg.value), two_ptr_arg.value), return_value_ptr);
+        } else {
+          builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_ptr_arg.value), e_ptr_arg.value), return_value_ptr);
+        }
+
         builder.CreateBr(end);
       }
     }
@@ -275,11 +323,15 @@ From an IR perspective, we immediately jump to the next special case.
      Check whether we successfully created the constant; if not, we calculate the result at runtime.
      From an IR perspective, we immediately jump to the next special case.
     */
-  if (!(minus_one_ptr_arg_created && e_inv_ptr_arg_created)) {
-    LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsMinusOne) needs both the arg constant -1.0 and e^(-1), but either one or both was not created successfully.\n");
+  if ((funcType != ExpFunType::Exp2 && !(minus_one_ptr_arg_created && e_inv_ptr_arg_created)) || (funcType == ExpFunType::Exp2 && !(two_inv_ptr_arg_created))) {
+    LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsMinusOne) needs both the arg constant -1.0 and e^(-1), or 2^(-1) for exp2, but either one or both were not created successfully.\n");
+    builder.CreateBr(init_pre);
   } else {
     LLVM_DEBUG(dbgs() << "Create checkArgIsMinusOne"
                       << "\n");
+
+    checkArgIsMinusOne = BasicBlock::Create(cont, "check_arg_is_minus_one", newfs);
+    argIsMinusOne = BasicBlock::Create(cont, "arg_is_minus_one", newfs);
 
     builder.CreateBr(checkArgIsMinusOne);
     builder.SetInsertPoint(checkArgIsMinusOne);
@@ -294,7 +346,12 @@ From an IR perspective, we immediately jump to the next special case.
       builder.SetInsertPoint(argIsMinusOne);
       {
         // Copy the result to the return value
-        builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_inv_ptr_arg.value), e_inv_ptr_arg.value), return_value_ptr);
+        if (funcType == ExpFunType::Exp2) {
+          builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(two_inv_ptr_arg.value), two_inv_ptr_arg.value), return_value_ptr);
+        } else {
+          builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_inv_ptr_arg.value), e_inv_ptr_arg.value), return_value_ptr);
+        }
+
         builder.CreateBr(end);
       }
     }
@@ -328,6 +385,8 @@ From an IR perspective, we immediately jump to the next special case.
   TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr_narrow(fxpret);
   // Pointer to An in the internal (wide) fixed point type
   TaffoMath::pair_ftp_value<llvm::Constant *> An_ptr(internal_fxpt);
+  // Pointer to An in the internal (wide) fixed point type
+  TaffoMath::pair_ftp_value<llvm::Constant *> ln2_ptr(fxparg);
   // The arctanh array table
   TaffoMath::pair_ftp_value<llvm::Constant *,
                             TaffoMath::TABLELENGHT>
@@ -344,10 +403,18 @@ From an IR perspective, we immediately jump to the next special case.
       cont, ref, TaffoMath::zero, fxpret, zero_ptr_narrow.value, zero_ptr_narrow.fpt);
   bool An_ptr_created = TaffoMath::createFixedPointFromConst(
       cont, ref, flttofix::compute_An_inv(flttofix::cordic_exp_negative_iterations, flttofix::cordic_exp_positive_iterations), internal_fxpt, An_ptr.value, An_ptr.fpt);
+  bool ln2_ptr_created = TaffoMath::createFixedPointFromConst(
+      cont, ref, flttofix::ln2, fxparg, ln2_ptr.value, ln2_ptr.fpt);
 
   if (!(zero_ptr_wide_created && zero_ptr_narrow_created && An_ptr_created)) {
     LLVM_DEBUG(dbgs() << "===== ERROR: Could not create one or more of the initialisation constants\n");
     llvm_unreachable("Could not create one or more of the initialisation constants. Exp cannot continue.");
+    return false;
+  }
+
+  if (funcType == ExpFunType::Exp2 && !ln2_ptr_created) {
+    LLVM_DEBUG(dbgs() << "===== ERROR: Could not create ln2 constant\n");
+    llvm_unreachable("Could not create ln2 constant. Exp2 cannot continue.");
     return false;
   }
 
@@ -362,6 +429,10 @@ From an IR perspective, we immediately jump to the next special case.
   An_ptr.value = TaffoMath::createGlobalConst(
       M, "An_ptr" + S_int_point, An_ptr.fpt.scalarToLLVMType(cont), An_ptr.value,
       dataLayout.getPrefTypeAlignment(An_ptr.fpt.scalarToLLVMType(cont)));
+
+  ln2_ptr.value = TaffoMath::createGlobalConst(
+      M, "ln2_ptr" + S_arg_point, ln2_ptr.fpt.scalarToLLVMType(cont), ln2_ptr.value,
+      dataLayout.getPrefTypeAlignment(ln2_ptr.fpt.scalarToLLVMType(cont)));
 
   // ----------------------------------------------------
   // Create the table for arctanh
@@ -417,13 +488,39 @@ From an IR perspective, we immediately jump to the next special case.
       TaffoMath::TABLELENGHT * (int_type_narrow->getScalarSizeInBits() >> 3));
   LLVM_DEBUG(dbgs() << "\nAdd to newf arctanh table. Copied " << TaffoMath::TABLELENGHT * (int_type_narrow->getScalarSizeInBits() >> 3) << " bytes\n");
 
-  LLVM_DEBUG(dbgs() << "fxparg: " << fxparg.scalarBitsAmt() << " frac part: " << fxparg.scalarFracBitsAmt() << " difference: " << fxparg.scalarBitsAmt() - fxparg.scalarFracBitsAmt() << "\n");
+  // ----------------------------------------------------
+  // Create the multiplication function that is needed for the exp2 case.
+
+  std::string mul_function_name("llvm.smul.fix.i");
+  mul_function_name.append(std::to_string(fxparg.scalarToLLVMType(cont)->getScalarSizeInBits()));
+
+  Function *function_mul;
+
+  if (funcType == ExpFunType::Exp2) {
+    function_mul = M->getFunction(mul_function_name);
+
+    if (function_mul == nullptr) {
+      std::vector<llvm::Type *> fun_arguments;
+      fun_arguments.push_back(
+          fxparg.scalarToLLVMType(cont));
+      fun_arguments.push_back(
+          fxparg.scalarToLLVMType(cont));
+      fun_arguments.push_back(Type::getInt32Ty(cont));
+      FunctionType *fun_type = FunctionType::get(
+          fxparg.scalarToLLVMType(cont), fun_arguments, false);
+      function_mul = llvm::Function::Create(fun_type, GlobalValue::ExternalLinkage,
+                                            mul_function_name, M);
+    }
+
+    LLVM_DEBUG(dbgs() << "Mul function: ");
+    function_mul->print(dbgs());
+    LLVM_DEBUG(dbgs() << "\n");
+  }
 
   // calculate exp
 
   LLVM_DEBUG(dbgs() << "Starting exp routine"
                     << "\n");
-
 
   auto zero_value_wide = builder.CreateLoad(getElementTypeFromValuePointer(zero_ptr_wide.value), zero_ptr_wide.value, "zero_wide");
   LLVM_DEBUG(dbgs() << "zero_value_wide: ");
@@ -440,10 +537,28 @@ From an IR perspective, we immediately jump to the next special case.
 
   auto An_value = builder.CreateLoad(getElementTypeFromValuePointer(An_ptr.value), An_ptr.value, "An_value");
   // Initialise x and y to the initial constant (which depends on the amount of iterations we do)
-  // x=An
-  builder.CreateStore(An_value, x_ptr.value);
-  // y=An
-  builder.CreateStore(An_value, y_ptr.value);
+  if (funcType == ExpFunType::Exp2) {
+    // x=An
+    builder.CreateStore(An_value, x_ptr.value);
+    // y=0
+    builder.CreateStore(zero_value_wide, y_ptr.value);
+    // Additionally, the argument should be equal to arg*ln2
+    auto new_arg = builder.CreateCall(
+        function_mul, {builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "initial_arg"), builder.CreateLoad(getElementTypeFromValuePointer(ln2_ptr.value), ln2_ptr.value, "ln2"),
+                       llvm::ConstantInt::get(fxparg.scalarToLLVMType(cont),
+                                              fxparg.scalarFracBitsAmt())});
+
+    LLVM_DEBUG(dbgs() << "new_arg: ");
+    new_arg->print(dbgs());
+    LLVM_DEBUG(dbgs() << "\n");
+
+    builder.CreateStore(new_arg, arg_ptr);
+  } else {
+    // x=An
+    builder.CreateStore(An_value, x_ptr.value);
+    // y=An
+    builder.CreateStore(An_value, y_ptr.value);
+  }
 
   LLVM_DEBUG(dbgs() << "Initial x and y set"
                     << "\n");
@@ -665,8 +780,6 @@ From an IR perspective, we immediately jump to the next special case.
   LLVM_DEBUG(dbgs() << "Start positive loop"
                     << "\n");
 
-  // TODO: repeat iterations 4, 13, 40
-
   i_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr), i_ptr, "i_value_loop2");
   i_value_wide = builder.CreateZExt(
       i_value, int_type_wide, "i_value_wide_loop2");
@@ -832,6 +945,15 @@ From an IR perspective, we immediately jump to the next special case.
   LLVM_DEBUG(dbgs() << "\n");
 
   // At this point x and y should both be equal to the result of the CORDIC algorithm. We return x.
+  // If we are calculating exp2, we need to return x+y.
+  // The trick we do is to simply check whether we are calculating exp2 and if so, we add x and y together, then store the result into x.
+
+  if (funcType == ExpFunType::Exp2) {
+    auto ret_x = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_final_exp2");
+    auto ret_y = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_value_final_exp2");
+    Value *x_plus_y = builder.CreateAdd(ret_x, ret_y, "x_plus_y");
+    builder.CreateStore(x_plus_y, x_ptr.value);
+  }
 
   auto ret = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_final");
 

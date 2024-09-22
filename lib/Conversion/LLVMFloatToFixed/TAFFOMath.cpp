@@ -1,5 +1,6 @@
 #include "TAFFOMath.h"
 #include "ArcSinCos.h"
+#include "HypCORDIC.h"
 #include "SinCos.h"
 #include "TaffoMathUtil.h"
 #include "llvm/ADT/StringRef.h"
@@ -18,7 +19,6 @@
 #include <llvm/Support/ErrorHandling.h>
 #include <string>
 #include <unordered_set>
-#include "HypCORDIC.h"
 
 #define DEBUG_TYPE "taffo-conversion"
 
@@ -457,13 +457,24 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
 
-  // Boilerplate
   llvm::LLVMContext &cont(oldf->getContext());
   DataLayout dataLayout(oldf->getParent());
 
   // Get the types of the arguments and the return value
   auto arg_type = newfs->getArg(0)->getType();
   auto ret_type = newfs->getReturnType();
+  // Get return type fixed point
+  flttofix::FixedPointType fxpret;
+  flttofix::FixedPointType fxparg;
+  bool foundRet = false;
+  bool foundArg = false;
+  TaffoMath::getFixedFromRet(ref, oldf, fxpret, foundRet);
+  // Get argument fixed point
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg, 0, foundArg);
+  if (!foundRet || !foundArg) {
+    LLVM_DEBUG(dbgs() << "Return or argument not found\n");
+    return partialSpecialCall(newfs, foundRet, fxpret);
+  }
 
   LLVM_DEBUG(dbgs() << "The argument type is: " << (*arg_type) << "\n");
   LLVM_DEBUG(dbgs() << "The return type is: " << (*ret_type) << "\n");
@@ -476,6 +487,12 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   auto *inst = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()));
 
   LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
+
+  // If unsigned:
+  if(fxparg.scalarIsSigned()) {
+    builder.CreateRet(inst);
+    return true;
+  }
 
   inst = builder.CreateSelect(
       // Compare:
@@ -544,7 +561,7 @@ bool FloatToFixed::convertLibmFunction(
     return createSinCos(this, NewFunc, OldFunc);
   }
 
-  if(taffo::start_with(fName, "tan")) {
+  if (taffo::start_with(fName, "tan")) {
     return createTan(this, NewFunc, OldFunc);
   }
 
@@ -556,19 +573,28 @@ bool FloatToFixed::convertLibmFunction(
     return createACos(this, NewFunc, OldFunc);
   }
 
+  // Exp and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  if (taffo::start_with(fName, "exp2")) {
+    return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
+  }
+
   if(taffo::start_with(fName, "atan")) {
     return createATan(this, NewFunc, OldFunc);
   }
 
   if (taffo::start_with(fName, "exp")) {
-    return createExp(this, NewFunc, OldFunc);
+    return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp);
   }
 
-  if(taffo::start_with(fName, "log10")) {
+  if (taffo::start_with(fName, "sqrt")) {
+    return flttofix::createSqrt(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "log10")) {
     return createLog10(this, NewFunc, OldFunc);
   }
 
-  if(taffo::start_with(fName, "log2")) {
+  if (taffo::start_with(fName, "log2")) {
     return createLog2(this, NewFunc, OldFunc);
   }
 
@@ -579,7 +605,6 @@ bool FloatToFixed::convertLibmFunction(
   if (taffo::start_with(fName, "log")) {
     return createLog(this, NewFunc, OldFunc);
   }
-
 
   if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabsf")) {
     return createAbs(this, NewFunc, OldFunc);
@@ -598,7 +623,7 @@ bool FloatToFixed::convertLibmFunction(
   }
 
   if (taffo::start_with(fName, "copysign")) {
-    //return createCopysign(this, NewFunc, OldFunc);
+    // return createCopysign(this, NewFunc, OldFunc);
   }
 
   llvm_unreachable("Function not recognized");
