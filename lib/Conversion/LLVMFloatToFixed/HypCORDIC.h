@@ -10,6 +10,18 @@
 
 namespace flttofix
 {
+
+/// Used in @ref createExp() to determine which function to create
+enum class ExpFunType
+{
+  /// exp function
+  Exp,
+  /// exp2 function, i.e. 2^x
+  Exp2,
+  /// expm1 function, i.e. exp(x) - 1
+  Expm1
+};
+
 /**
  * @brief Handles the exp and exp2 functions.
  *
@@ -46,7 +58,7 @@ namespace flttofix
  *
  * We estimated we need 22 bits for the integer part + 1 for the sign for these internal values.
  */
-bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const bool& isExp2 = false);
+bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const ExpFunType& funcType = ExpFunType::Exp);
 
 bool createLog(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 

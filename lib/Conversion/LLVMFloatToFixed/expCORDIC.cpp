@@ -15,7 +15,7 @@
 namespace flttofix
 {
 
-bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const bool &isExp2)
+bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, const ExpFunType &funcType)
 {
   //
   newfs->deleteBody();
@@ -151,7 +151,7 @@ bool createExp(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf, c
   TaffoMath::pair_ftp_value<llvm::Constant *> two_inv_ptr_arg(fxpret);
   bool two_inv_ptr_arg_created = false;
 
-  if (isExp2) {
+  if (funcType == ExpFunType::Exp2) {
     LLVM_DEBUG(dbgs() << "Creating exp2 constants\n");
 
     // Pointer to 2 (for returning)
@@ -284,7 +284,7 @@ From an IR perspective, we immediately jump to the next special case.
        Check whether we successfully created the constant; if not, we calculate the result at runtime.
        From an IR perspective, we immediately jump to the next special case.
       */
-  if ((!isExp2 && !(one_ptr_arg_created && e_ptr_arg_created)) || (isExp2 && !(two_ptr_arg_created))) {
+  if (((funcType != ExpFunType::Exp) && !(one_ptr_arg_created && e_ptr_arg_created)) || (funcType == ExpFunType::Exp && !(two_ptr_arg_created))) {
     LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsOne) needs both the arg constant 1.0 and e, or 2.0 for exp2, but either one or both were not created successfully.\n");
     builder.CreateBr(checkArgIsMinusOne_pre);
   } else {
@@ -306,7 +306,7 @@ From an IR perspective, we immediately jump to the next special case.
       builder.SetInsertPoint(argIsOne);
       {
         // Copy the result to the return value
-        if (isExp2) {
+        if (funcType == ExpFunType::Exp2) {
           builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(two_ptr_arg.value), two_ptr_arg.value), return_value_ptr);
         } else {
           builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_ptr_arg.value), e_ptr_arg.value), return_value_ptr);
@@ -323,7 +323,7 @@ From an IR perspective, we immediately jump to the next special case.
      Check whether we successfully created the constant; if not, we calculate the result at runtime.
      From an IR perspective, we immediately jump to the next special case.
     */
-  if ((!isExp2 && !(minus_one_ptr_arg_created && e_inv_ptr_arg_created)) || (isExp2 && !(two_inv_ptr_arg_created))) {
+  if ((funcType != ExpFunType::Exp2 && !(minus_one_ptr_arg_created && e_inv_ptr_arg_created)) || (funcType == ExpFunType::Exp2 && !(two_inv_ptr_arg_created))) {
     LLVM_DEBUG(dbgs() << "WARNING: This section (checkArgIsMinusOne) needs both the arg constant -1.0 and e^(-1), or 2^(-1) for exp2, but either one or both were not created successfully.\n");
     builder.CreateBr(init_pre);
   } else {
@@ -346,7 +346,7 @@ From an IR perspective, we immediately jump to the next special case.
       builder.SetInsertPoint(argIsMinusOne);
       {
         // Copy the result to the return value
-        if (isExp2) {
+        if (funcType == ExpFunType::Exp2) {
           builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(two_inv_ptr_arg.value), two_inv_ptr_arg.value), return_value_ptr);
         } else {
           builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(e_inv_ptr_arg.value), e_inv_ptr_arg.value), return_value_ptr);
@@ -412,7 +412,7 @@ From an IR perspective, we immediately jump to the next special case.
     return false;
   }
 
-  if (isExp2 && !ln2_ptr_created) {
+  if (funcType == ExpFunType::Exp2 && !ln2_ptr_created) {
     LLVM_DEBUG(dbgs() << "===== ERROR: Could not create ln2 constant\n");
     llvm_unreachable("Could not create ln2 constant. Exp2 cannot continue.");
     return false;
@@ -491,20 +491,20 @@ From an IR perspective, we immediately jump to the next special case.
   // ----------------------------------------------------
   // Create the multiplication function that is needed for the exp2 case.
 
-  /*std::string mul_function_name("llvm.smul.fix.i");
+  std::string mul_function_name("llvm.smul.fix.i");
   mul_function_name.append(std::to_string(fxparg.scalarToLLVMType(cont)->getScalarSizeInBits()));
 
   Function *function_mul;
 
-  if (isExp2) {
+  if (funcType == ExpFunType::Exp2) {
     function_mul = M->getFunction(mul_function_name);
 
     if (function_mul == nullptr) {
       std::vector<llvm::Type *> fun_arguments;
       fun_arguments.push_back(
-          fxparg.scalarToLLVMType(cont)); // depends on your type
+          fxparg.scalarToLLVMType(cont));
       fun_arguments.push_back(
-          fxparg.scalarToLLVMType(cont)); // depends on your type
+          fxparg.scalarToLLVMType(cont));
       fun_arguments.push_back(Type::getInt32Ty(cont));
       FunctionType *fun_type = FunctionType::get(
           fxparg.scalarToLLVMType(cont), fun_arguments, false);
@@ -515,7 +515,7 @@ From an IR perspective, we immediately jump to the next special case.
     LLVM_DEBUG(dbgs() << "Mul function: ");
     function_mul->print(dbgs());
     LLVM_DEBUG(dbgs() << "\n");
-  }*/
+  }
 
   // calculate exp
 
@@ -537,18 +537,20 @@ From an IR perspective, we immediately jump to the next special case.
 
   auto An_value = builder.CreateLoad(getElementTypeFromValuePointer(An_ptr.value), An_ptr.value, "An_value");
   // Initialise x and y to the initial constant (which depends on the amount of iterations we do)
-  if (isExp2) {
+  if (funcType == ExpFunType::Exp2) {
     // x=An
     builder.CreateStore(An_value, x_ptr.value);
     // y=0
-    builder.CreateStore(zero_ptr_wide.value, y_ptr.value);
+    builder.CreateStore(zero_value_wide, y_ptr.value);
     // Additionally, the argument should be equal to arg*ln2
-    /*auto new_arg = builder.CreateCall(
+    auto new_arg = builder.CreateCall(
         function_mul, {builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "initial_arg"), builder.CreateLoad(getElementTypeFromValuePointer(ln2_ptr.value), ln2_ptr.value, "ln2"),
                        llvm::ConstantInt::get(fxparg.scalarToLLVMType(cont),
-                                              fxparg.scalarFracBitsAmt())});*/
-    auto new_arg = builder.CreateMul(
-        builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "initial_arg"), builder.CreateLoad(getElementTypeFromValuePointer(ln2_ptr.value), ln2_ptr.value, "ln2"), "new_arg");
+                                              fxparg.scalarFracBitsAmt())});
+
+    LLVM_DEBUG(dbgs() << "new_arg: ");
+    new_arg->print(dbgs());
+    LLVM_DEBUG(dbgs() << "\n");
 
     builder.CreateStore(new_arg, arg_ptr);
   } else {
@@ -946,7 +948,7 @@ From an IR perspective, we immediately jump to the next special case.
   // If we are calculating exp2, we need to return x+y.
   // The trick we do is to simply check whether we are calculating exp2 and if so, we add x and y together, then store the result into x.
 
-  if (isExp2) {
+  if (funcType == ExpFunType::Exp2) {
     auto ret_x = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_final_exp2");
     auto ret_y = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_value_final_exp2");
     Value *x_plus_y = builder.CreateAdd(ret_x, ret_y, "x_plus_y");
