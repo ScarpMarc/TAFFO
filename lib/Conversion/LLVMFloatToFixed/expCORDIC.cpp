@@ -541,7 +541,7 @@ From an IR perspective, we immediately jump to the next special case.
     // x=An
     builder.CreateStore(An_value, x_ptr.value);
     // y=0
-    builder.CreateStore(An_value, zero_ptr_wide.value);
+    builder.CreateStore(zero_ptr_wide.value, y_ptr.value);
     // Additionally, the argument should be equal to arg*ln2
     /*auto new_arg = builder.CreateCall(
         function_mul, {builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "initial_arg"), builder.CreateLoad(getElementTypeFromValuePointer(ln2_ptr.value), ln2_ptr.value, "ln2"),
