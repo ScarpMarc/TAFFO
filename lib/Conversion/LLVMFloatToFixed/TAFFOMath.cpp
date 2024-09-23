@@ -1,8 +1,8 @@
 #include "TAFFOMath.h"
 #include "ArcSinCos.h"
+#include "CordicSqrt.h"
 #include "HypCORDIC.h"
 #include "SinCos.h"
-#include "CordicSqrt.h"
 #include "TaffoMathUtil.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
@@ -570,6 +570,114 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   return true;
 }
 
+/**
+ * Create the round function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createRound(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
+
+  newfs->deleteBody();
+
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(oldf->getParent());
+
+  // Get the types of the arguments and the return value
+  auto arg_type = newfs->getArg(0)->getType();
+  auto ret_type = newfs->getReturnType();
+  // Get return type fixed point
+  flttofix::FixedPointType fxpret;
+  flttofix::FixedPointType fxparg;
+  bool foundRet = false;
+  bool foundArg = false;
+  TaffoMath::getFixedFromRet(ref, oldf, fxpret, foundRet);
+  // Get argument fixed point
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg, 0, foundArg);
+  if (!foundRet || !foundArg) {
+    LLVM_DEBUG(dbgs() << "Return or argument not found\n");
+    return partialSpecialCall(newfs, foundRet, fxpret);
+  }
+
+  LLVM_DEBUG(dbgs() << "The argument type is: " << (*arg_type) << "\n");
+  LLVM_DEBUG(dbgs() << "The return type is: " << (*ret_type) << "\n");
+
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // Create a bitcast of the argument to an integer type
+  Value *result = builder.CreateBitCast(newfs->getArg(0), llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), "initial_arg");
+
+  LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
+
+  auto frac_part = builder.CreateShl(result, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt(), "frac_part");
+  auto fracPartIsZero = builder.CreateICmpEQ(
+      frac_part,
+      llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), "frac_part_is_zero");
+
+  auto fracPartIsGreaterOrEqualThanHalf = builder.CreateICmpUGE(
+      frac_part,
+      llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1 << (arg_type->getScalarSizeInBits() - 1)), "frac_part_is_greater_equal_half");
+
+  Value *integer_part = builder.CreateAShr(result, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "integer_part");
+
+  Value *result_arg_is_positive_and_frac_part_is_less_than_half = integer_part;
+  Value *result_arg_if_frac_part_is_greater_than_half = builder.CreateAdd(integer_part, llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1), "result_if_frac_part_is_greater_than_half");
+
+  Value *result_if_frac_part_is_nonzero;
+  // If signed:
+  if (fxparg.scalarIsSigned()) {
+
+
+    auto argIsPositive = builder.CreateICmpSGE(
+        integer_part,
+        llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), "arg_is_positive");
+
+    /*
+      If arg is positive and fractional part is less than half, OR if arg is negative and fractional part is greater than half,
+      then the result is the integer part of the argument.
+    */
+    Value *result_is_negative_and_frac_part_is_less_than_half = integer_part;
+
+    // Choose the result based on the sign of the argument and the fractional part
+    result_if_frac_part_is_nonzero = builder.CreateSelect(argIsPositive,
+                                                                 builder.CreateSelect(fracPartIsGreaterOrEqualThanHalf, result_arg_if_frac_part_is_greater_than_half, result_arg_is_positive_and_frac_part_is_less_than_half, "result_if_positive"),
+                                                                 builder.CreateSelect(fracPartIsGreaterOrEqualThanHalf, result_arg_if_frac_part_is_greater_than_half, result_is_negative_and_frac_part_is_less_than_half, "result_if_negative"), "result_if_frac_part_is_nonzero_integer_part");
+  } else {
+    // If unsigned skip positive/negative check
+    result_if_frac_part_is_nonzero = builder.CreateSelect(fracPartIsGreaterOrEqualThanHalf, result_arg_if_frac_part_is_greater_than_half, integer_part, "result_if_frac_part_is_greater_than_half");
+  }
+  
+  // Shift the result to the right by the fractional part
+  result_if_frac_part_is_nonzero = builder.CreateShl(result_if_frac_part_is_nonzero, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "result_if_frac_part_is_nonzero");
+
+  // If fractional part is zero keep the original result
+  result = builder.CreateSelect(fracPartIsZero, result, result_if_frac_part_is_nonzero, "result_final");
+
+  LLVM_DEBUG(dbgs() << "Round logic created.\n");
+
+
+  // Cast the integer to the return type
+  if (arg_type->isFloatingPointTy() && ret_type->isFloatingPointTy()) {
+    result = builder.CreateFPCast(result, ret_type);
+  } else if (arg_type->isFloatingPointTy() && ret_type->isIntegerTy()) {
+    result = builder.CreateFPToSI(result, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isFloatingPointTy()) {
+    result = builder.CreateSIToFP(result, ret_type);
+  } else if (arg_type->isIntegerTy() && ret_type->isIntegerTy()) {
+    result = builder.CreateIntCast(result, ret_type, true);
+  }
+  builder.CreateRet(result);
+
+
+  return true;
+}
+
 // TODO: add an hashmap to dispatch
 bool FloatToFixed::convertLibmFunction(
     Function *OldFunc, Function *NewFunc)
@@ -607,7 +715,7 @@ bool FloatToFixed::convertLibmFunction(
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
   }
 
-  if(taffo::start_with(fName, "atan")) {
+  if (taffo::start_with(fName, "atan")) {
     return createATan(this, NewFunc, OldFunc);
   }
 
@@ -635,7 +743,7 @@ bool FloatToFixed::convertLibmFunction(
     return createLog(this, NewFunc, OldFunc);
   }
 
-  if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabsf")) {
+  if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabs")) {
     return createAbs(this, NewFunc, OldFunc);
   }
 
@@ -649,6 +757,10 @@ bool FloatToFixed::convertLibmFunction(
 
   if (taffo::start_with(fName, "trunc")) {
     return createTrunc(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "round")) {
+    return createRound(this, NewFunc, OldFunc);
   }
 
   if (taffo::start_with(fName, "copysign")) {
