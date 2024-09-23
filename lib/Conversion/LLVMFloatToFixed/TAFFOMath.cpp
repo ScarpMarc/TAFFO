@@ -240,6 +240,342 @@ bool partialSpecialCall(
 }
 
 
+/**
+ * Create the fma function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createFma(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  newfs->deleteBody();
+  Module *M = oldf->getParent();
+  // Retrieve context used in later instruction
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(M);
+  LLVM_DEBUG(dbgs() << "\nGet Context " << &cont << "\n");
+  // Get first basic block of function
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  LLVM_DEBUG(dbgs() << "\nGet entry point " << where);
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // get return type fixed point
+  flttofix::FixedPointType fxpret;
+  // get arguments fixed point
+  flttofix::FixedPointType fxparg1;
+  flttofix::FixedPointType fxparg2;
+  flttofix::FixedPointType fxparg3;
+
+  bool foundRet = false;
+  bool foundArg1 = false;
+  bool foundArg2 = false;
+  bool foundArg3 = false;
+
+  TaffoMath::getFixedFromRet(ref, oldf, fxpret, foundRet);
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg1, 0, foundArg1);
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg2, 1, foundArg2);
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg3, 2, foundArg3);
+
+  if (!foundRet || !foundArg1 || !foundArg2 || !foundArg3) {
+    LLVM_DEBUG(dbgs() << "Return or argument not found\n");
+    return partialSpecialCall(newfs, foundRet, fxpret);
+  }
+
+  auto int_type = fxparg1.scalarToLLVMType(cont);
+
+  // Allocate space for the arguments
+  Value *arg1_ptr = builder.CreateAlloca(int_type, nullptr, "arg1");
+  builder.CreateStore(newfs->getArg(0), arg1_ptr);
+
+  Value *arg2_ptr = builder.CreateAlloca(int_type, nullptr, "arg2");
+  builder.CreateStore(newfs->getArg(1), arg2_ptr);
+
+  Value *arg3_ptr = builder.CreateAlloca(int_type, nullptr, "arg3");
+  builder.CreateStore(newfs->getArg(2), arg3_ptr);
+
+  // handle unsigned arg1
+  if (!fxparg1.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), ConstantInt::get(int_type, 1)), arg1_ptr);
+    fxparg1.scalarFracBitsAmt() = fxparg1.scalarFracBitsAmt() - 1;
+    fxparg1.scalarIsSigned() = true;
+  }
+  // handle unsigned arg2
+  if (!fxparg2.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), ConstantInt::get(int_type, 1)), arg2_ptr);
+    fxparg2.scalarFracBitsAmt() = fxparg2.scalarFracBitsAmt() - 1;
+    fxparg2.scalarIsSigned() = true;
+  }
+  // handle unsigned arg3
+  if (!fxparg3.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg3_ptr), arg3_ptr), ConstantInt::get(int_type, 1)), arg3_ptr);
+    fxparg3.scalarFracBitsAmt() = fxparg3.scalarFracBitsAmt() - 1;
+    fxparg3.scalarIsSigned() = true;
+  }
+
+  // Allocate space for the result
+  Value *result_ptr = builder.CreateAlloca(int_type, nullptr, "result");
+
+  // ----------------------------------------------------
+  // Create the multiplication function that is needed for the arg1*arg2 part of the fma
+  std::string mul_function_name("llvm.smul.fix.i");
+  mul_function_name.append(std::to_string(fxpret.scalarToLLVMType(cont)->getScalarSizeInBits()));
+
+  Function *function_mul = M->getFunction(mul_function_name);
+  if (function_mul == nullptr) {
+    // Define the function if it doesn't exist
+    std::vector<llvm::Type *> fun_arguments;
+    fun_arguments.push_back(
+        fxpret.scalarToLLVMType(cont));
+    fun_arguments.push_back(
+        fxpret.scalarToLLVMType(cont));
+    fun_arguments.push_back(Type::getInt32Ty(cont));
+    FunctionType *fun_type = FunctionType::get(
+        fxpret.scalarToLLVMType(cont), fun_arguments, false);
+    function_mul = llvm::Function::Create(fun_type, GlobalValue::ExternalLinkage,
+                                          mul_function_name, M);
+  }
+
+  LLVM_DEBUG(dbgs() << "Mul function: ");
+  function_mul->print(dbgs());
+  LLVM_DEBUG(dbgs() << "\n");
+
+  // Adapt the fractional bits of the arguments to the fractional bits of the result
+  if (fxparg1.scalarFracBitsAmt() > fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), fxparg1.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg1_ptr);
+  } else if (fxparg1.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), fxpret.scalarFracBitsAmt() - fxparg1.scalarFracBitsAmt()), arg1_ptr);
+  }
+  if (fxparg2.scalarFracBitsAmt() > fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), fxparg2.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg2_ptr);
+  } else if (fxparg2.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), fxpret.scalarFracBitsAmt() - fxparg2.scalarFracBitsAmt()), arg2_ptr);
+  }
+  if (fxparg3.scalarFracBitsAmt() > fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg3_ptr), arg3_ptr), fxparg3.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg3_ptr);
+  } else if (fxparg3.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg3_ptr), arg3_ptr), fxpret.scalarFracBitsAmt() - fxparg3.scalarFracBitsAmt()), arg3_ptr);
+  }
+
+  // Perform the multiplication call (arg1*arg2)
+  auto result_tmp = builder.CreateCall(
+      function_mul,
+      {
+          builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr, "arg1"),
+          builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr, "arg2"),
+          llvm::ConstantInt::get(fxpret.scalarToLLVMType(cont), fxpret.scalarFracBitsAmt()) // Ensure this matches the expected type
+      });
+
+  // Store the result of the multiplication in the result pointer
+  builder.CreateStore(result_tmp, result_ptr);
+
+  // Add arg1 * arg2 to arg3 and store it in result_ptr
+  builder.CreateStore(builder.CreateAdd(
+                          builder.CreateLoad(getElementTypeFromValuePointer(result_ptr), result_ptr),
+                          builder.CreateLoad(getElementTypeFromValuePointer(arg3_ptr), arg3_ptr)),
+                      result_ptr);
+
+  builder.CreateRet(builder.CreateLoad(getElementTypeFromValuePointer(result_ptr), result_ptr));
+  return true;
+}
+
+
+/*
+Doesn't work look at TAFFO/lib/RangeAnalysis/TaffoVRA/RangeOperationsCallWhitelist.cpp
+*/
+bool createFmax(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  newfs->deleteBody();
+  Module *M = oldf->getParent();
+  // Retrieve context used in later instruction
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(M);
+  LLVM_DEBUG(dbgs() << "\nGet Context " << &cont << "\n");
+  // Get first basic block of function
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  LLVM_DEBUG(dbgs() << "\nGet entry point " << where);
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // get return type fixed point
+  flttofix::FixedPointType fxpret;
+  // get arguments fixed point
+  flttofix::FixedPointType fxparg1;
+  flttofix::FixedPointType fxparg2;
+
+  bool foundRet = false;
+  bool foundArg1 = false;
+  bool foundArg2 = false;
+
+  // Get the fixed point type of the return value
+  TaffoMath::getFixedFromRet(ref, oldf, fxpret, foundRet);
+  // Get the fixed point type of the arguments
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg1, 0, foundArg1);
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg2, 1, foundArg2);
+
+  if (!foundRet || !foundArg1 || !foundArg2) {
+    LLVM_DEBUG(dbgs() << "Return or argument not found\n");
+    return partialSpecialCall(newfs, foundRet, fxpret);
+  }
+
+  auto int_type = fxpret.scalarToLLVMType(cont);
+
+  // Allocate space for the arguments
+  Value *arg1_ptr = builder.CreateAlloca(int_type, nullptr, "arg1");
+  builder.CreateStore(newfs->getArg(0), arg1_ptr);
+
+  Value *arg2_ptr = builder.CreateAlloca(int_type, nullptr, "arg2");
+  builder.CreateStore(newfs->getArg(1), arg2_ptr);
+
+  // handle unsigned arg1
+  if (!fxparg1.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), ConstantInt::get(int_type, 1)), arg1_ptr);
+    fxparg1.scalarFracBitsAmt() = fxparg1.scalarFracBitsAmt() - 1;
+    fxparg1.scalarIsSigned() = true;
+  }
+  // handle unsigned arg2
+  if (!fxparg2.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), ConstantInt::get(int_type, 1)), arg2_ptr);
+    fxparg2.scalarFracBitsAmt() = fxparg2.scalarFracBitsAmt() - 1;
+    fxparg2.scalarIsSigned() = true;
+  }
+
+  // Allocate space for the result
+  Value *result_ptr = builder.CreateAlloca(int_type, nullptr, "result");
+
+  // Adapt the fractional bits of the arguments to the fractional bits of the result
+  if (fxparg1.scalarFracBitsAmt() > fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), fxparg1.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg1_ptr);
+  } else if (fxparg1.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), fxpret.scalarFracBitsAmt() - fxparg1.scalarFracBitsAmt()), arg1_ptr);
+  }
+  if (fxparg2.scalarFracBitsAmt() > fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), fxparg2.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), arg2_ptr);
+  } else if (fxparg2.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+    builder.CreateStore(builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), fxpret.scalarFracBitsAmt() - fxparg2.scalarFracBitsAmt()), arg2_ptr);
+  }
+
+  // Perform the comparison
+  auto cmp = builder.CreateICmpSGT(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr));
+
+  // Store the result of the comparison in the result pointer
+  builder.CreateStore(builder.CreateSelect(cmp, builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr)), result_ptr);
+
+  builder.CreateRet(builder.CreateLoad(getElementTypeFromValuePointer(result_ptr), result_ptr));
+  return true;
+}
+
+/**
+ * Create the copysign function.
+ *
+ * @param ref the FloatToFixed object
+ * @param newfs the new function
+ * @param oldf the old function
+ * @return true if the function was created successfully, false otherwise
+ */
+bool createCopysign(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
+{
+  newfs->deleteBody();
+  Module *M = oldf->getParent();
+  // Retrieve context used in later instruction
+  llvm::LLVMContext &cont(oldf->getContext());
+  DataLayout dataLayout(M);
+  LLVM_DEBUG(dbgs() << "\nGet Context " << &cont << "\n");
+  // Get first basic block of function
+  BasicBlock::Create(cont, "Entry", newfs);
+  BasicBlock *where = &(newfs->getEntryBlock());
+  LLVM_DEBUG(dbgs() << "\nGet entry point " << where);
+  IRBuilder<> builder(where, where->getFirstInsertionPt());
+
+  // get return type fixed point
+  flttofix::FixedPointType fxpret;
+  // get arguments fixed point
+  flttofix::FixedPointType fxparg1;
+  flttofix::FixedPointType fxparg2;
+
+  bool foundRet = false;
+  bool foundArg1 = false;
+  bool foundArg2 = false;
+
+  // Get the fixed point type of the return value
+  TaffoMath::getFixedFromRet(ref, oldf, fxpret, foundRet);
+  // Get the fixed point type of the arguments
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg1, 0, foundArg1);
+  TaffoMath::getFixedFromArg(ref, oldf, fxparg2, 1, foundArg2);
+
+  if (!foundRet || !foundArg1 || !foundArg2) {
+    LLVM_DEBUG(dbgs() << "Return or argument not found\n");
+    return partialSpecialCall(newfs, foundRet, fxpret);
+  }
+
+  auto int_type = fxpret.scalarToLLVMType(cont);
+
+  // Allocate space for the arguments
+  Value *arg1_ptr = builder.CreateAlloca(int_type, nullptr, "arg1");
+  builder.CreateStore(newfs->getArg(0), arg1_ptr);
+
+  Value *arg2_ptr = builder.CreateAlloca(int_type, nullptr, "arg2");
+  builder.CreateStore(newfs->getArg(1), arg2_ptr);
+
+  // Allocate space for the result
+  Value *result_ptr = builder.CreateAlloca(int_type, nullptr, "result");
+
+  // handle unsigned arg1
+  if (!fxparg1.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr), ConstantInt::get(int_type, 1)), arg1_ptr);
+    fxparg1.scalarFracBitsAmt() = fxparg1.scalarFracBitsAmt() - 1;
+    fxparg1.scalarIsSigned() = true;
+  }
+  // handle unsigned arg2
+  if (!fxparg2.scalarIsSigned()) {
+    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr), ConstantInt::get(int_type, 1)), arg2_ptr);
+    fxparg2.scalarFracBitsAmt() = fxparg2.scalarFracBitsAmt() - 1;
+    fxparg2.scalarIsSigned() = true;
+  }
+
+  // Generate strings for constants names
+  std::string S_arg1_point = "." + std::to_string(fxparg1.scalarFracBitsAmt());
+
+  // Pointer to zero in the internal fixed point type
+  TaffoMath::pair_ftp_value<llvm::Constant *> zero_arg(fxparg1);
+
+  TaffoMath::createFixedPointFromConst(
+      cont, ref, TaffoMath::zero, fxparg1, zero_arg.value, zero_arg.fpt);
+
+  zero_arg.value = TaffoMath::createGlobalConst(
+      M, "zero_arg" + S_arg1_point, zero_arg.fpt.scalarToLLVMType(cont), zero_arg.value,
+      dataLayout.getPrefTypeAlignment(zero_arg.fpt.scalarToLLVMType(cont)));
+
+  // Calculate copysign
+
+  // Load the zero value
+  auto zero_value = builder.CreateLoad(getElementTypeFromValuePointer(zero_arg.value), zero_arg.value);
+
+  // Check the sign of the arg2
+  Value *check_sign = builder.CreateICmpSLE(
+      builder.CreateLoad(getElementTypeFromValuePointer(arg2_ptr), arg2_ptr),
+      zero_value // Confronta con zero per verificare il segno negativo
+  );
+
+  // result = check_sign ? -arg1 : arg1
+  auto result_value = builder.CreateSelect(
+      check_sign,
+      builder.CreateSub(
+          zero_value,
+          builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr)),
+      builder.CreateLoad(getElementTypeFromValuePointer(arg1_ptr), arg1_ptr));
+
+  // Store the result
+  builder.CreateStore(result_value, result_ptr);
+
+  // Return the result
+  builder.CreateRet(builder.CreateLoad(getElementTypeFromValuePointer(result_ptr), result_ptr));
+  return true;
+}
+
+
 bool createAbs(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
@@ -351,14 +687,14 @@ bool createCeil(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       inst,
       // If false (fractional part was nonzero): shift:
       builder.CreateShl(
-              // The sum of:
-              builder.CreateAdd(
-                  // The right shift of the argument by the fractional part, i.e. the fractional part is removed
-                  builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
-                  // To the constant 1. This is needed because the number is encoded in two's complement
-                  llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
-              // By the amount of bits in fractional part. At this point, the fractional part is removed
-              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()));
+          // The sum of:
+          builder.CreateAdd(
+              // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+              builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
+              // To the constant 1. This is needed because the number is encoded in two's complement
+              llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
+          // By the amount of bits in fractional part. At this point, the fractional part is removed
+          ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()));
 
   LLVM_DEBUG(dbgs() << "Ceil logic created.\n");
 
@@ -489,7 +825,7 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
 
   // If unsigned:
-  if(fxparg.scalarIsSigned()) {
+  if (fxparg.scalarIsSigned()) {
     builder.CreateRet(inst);
     return true;
   }
@@ -578,7 +914,7 @@ bool FloatToFixed::convertLibmFunction(
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
   }
 
-  if(taffo::start_with(fName, "atan")) {
+  if (taffo::start_with(fName, "atan")) {
     return createATan(this, NewFunc, OldFunc);
   }
 
@@ -606,6 +942,10 @@ bool FloatToFixed::convertLibmFunction(
     return createLog(this, NewFunc, OldFunc);
   }
 
+  if (taffo::start_with(fName, "fma")) {
+    return createFma(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "abs") || taffo::start_with(fName, "fabsf")) {
     return createAbs(this, NewFunc, OldFunc);
   }
@@ -623,7 +963,7 @@ bool FloatToFixed::convertLibmFunction(
   }
 
   if (taffo::start_with(fName, "copysign")) {
-    // return createCopysign(this, NewFunc, OldFunc);
+    return createCopysign(this, NewFunc, OldFunc);
   }
 
   llvm_unreachable("Function not recognized");
