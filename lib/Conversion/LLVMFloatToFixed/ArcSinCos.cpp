@@ -473,9 +473,11 @@ bool createATan(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
 
   /*
-    Define LLVM integer types that will hold our variables.
-    The internal variables will have a similar magnitude to the argument, so we can use the same data type with an additional bit for the integer part.
-  */
+     Define LLVM integer types that will hold our variables.
+     The internal variables will have a similar precision to the argument,
+     so we can use the same data type with an additional bit for the integer part.
+     The internal fixed-point type will have 5 fewer fractional bits to account for the oscillation in the x values.
+ */
   auto int_type = fxpret.scalarToLLVMType(cont);
   auto internal_fxpt = flttofix::FixedPointType(true, fxparg.scalarFracBitsAmt() - 5, fxparg.scalarBitsAmt());
   LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
@@ -558,7 +560,7 @@ bool createATan(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
   TaffoMath::pair_ftp_value<llvm::Constant *> zero_internal(internal_fxpt);
   // Pointer to one in the internal fixed point type
   TaffoMath::pair_ftp_value<llvm::Constant *> one(internal_fxpt);
-  // The arctanh array table
+  // The arctan array table
   TaffoMath::pair_ftp_value<llvm::Constant *,
                             TaffoMath::TABLELENGHT>
       arctan_2power;
@@ -584,9 +586,9 @@ bool createATan(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
       dataLayout.getPrefTypeAlignment(one.fpt.scalarToLLVMType(cont)));
 
   // ----------------------------------------------------
-  // Create the table for arctanh
+  // Create the table for arctan
 
-  LLVM_DEBUG(dbgs() << "\n===== Create arctanh table ====="
+  LLVM_DEBUG(dbgs() << "\n===== Create arctan table ====="
                     << "\n");
 
   llvm::AllocaInst *pointer_to_arctan_array = nullptr;
@@ -643,7 +645,7 @@ bool createATan(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                     << "\n");
 
   auto one_value = builder.CreateLoad(getElementTypeFromValuePointer(one.value), one.value, "one");
-  //Shift right arg_value by 5
+  // Shift right arg_value by 5
   auto arg_value = builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value"), ConstantInt::get(int_type, 5), "arg_value_shr_5");
 
   // Initialise x y z

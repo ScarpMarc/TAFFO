@@ -10,7 +10,7 @@ int main(int argc, char *argv[])
   // copysign(magnitude, sign)
 
   for (int i = 0; i < 2000; i++) {
-    float p = copysignf(mag, sgn);
+    float p = copysign(mag, sgn);
     printf("mag: %f, sgn: %f, res: %f\n", mag, sgn, p);
     mag += 0.1f;
     sgn = -sgn;
