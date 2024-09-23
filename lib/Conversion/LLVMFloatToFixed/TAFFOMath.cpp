@@ -2,6 +2,7 @@
 #include "ArcSinCos.h"
 #include "HypCORDIC.h"
 #include "SinCos.h"
+#include "CordicSqrt.h"
 #include "TaffoMathUtil.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
@@ -656,6 +657,8 @@ bool createCeil(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
 
+  newfs->deleteBody();
+
   // Boilerplate
   llvm::LLVMContext &cont(oldf->getContext());
   DataLayout dataLayout(oldf->getParent());
@@ -725,6 +728,8 @@ bool createFloor(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
 
+  newfs->deleteBody();
+
   // Boilerplate
   llvm::LLVMContext &cont(oldf->getContext());
   DataLayout dataLayout(oldf->getParent());
@@ -793,6 +798,8 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 {
   LLVM_DEBUG(dbgs() << "*********** " << __FUNCTION__ << "\n");
 
+  newfs->deleteBody();
+
   llvm::LLVMContext &cont(oldf->getContext());
   DataLayout dataLayout(oldf->getParent());
 
@@ -824,45 +831,63 @@ bool createTrunc(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
   LLVM_DEBUG(dbgs() << "Created bitcast with size " << arg_type->getPrimitiveSizeInBits() << " bits.\n");
 
-  // If unsigned:
+  // If signed:
   if (fxparg.scalarIsSigned()) {
-    builder.CreateRet(inst);
-    return true;
-  }
+    inst = builder.CreateSelect(
+        // Compare:
+        builder.CreateICmpEQ(
+            // The fractional part of the argument
+            builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt(), "frac_part"),
+            // The constant 0
+            llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), "frac_part_is_zero"),
+        // If true (fractional part was already 0), return the argument
+        inst,
+        // If false (fractional part was nonzero):
+        builder.CreateSelect(
+            // Compare:
+            builder.CreateICmpEQ(
+                // The sign (i.e., the most significant bit) of the argument
+                builder.CreateLShr(inst, arg_type->getScalarSizeInBits() - 1, "sign_bit"),
+                // The constant 0
+                llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), "sign_bit_is_zero"),
+            // If true (the argument is positive): shift left:
+            builder.CreateShl(
+                // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+                builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "integer_part"),
+                // By the amount of bits in fractional part. At this point, the fractional part is removed
+                ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "arg_final_if_positive"),
+            // If false (the argument is negative): shift right:
+            builder.CreateShl(
+                // Add:
+                builder.CreateAdd(
+                    // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+                    builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "integer_part"),
+                    // To the constant 1. This is needed because the number is encoded in two's complement
+                    llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1), "arg_plus_one"),
+                // By the amount of bits in fractional part. At this point, the fractional part is removed
+                ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "arg_final_if_negative"),
+            "arg_final"),
+        "return_value");
 
-  inst = builder.CreateSelect(
-      // Compare:
-      builder.CreateICmpEQ(
-          // The fractional part of the argument
-          builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt()),
-          // The constant 0
-          llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
-      // If true (fractional part was already 0), return the argument
-      inst,
-      // If false (fractional part was nonzero):
-      builder.CreateSelect(
-          // Compare:
-          builder.CreateICmpEQ(
-              // The sign (i.e., the most significant bit) of the argument
-              builder.CreateLShr(inst, arg_type->getScalarSizeInBits() - 1),
-              // The constant 0
-              llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0)),
-          // If true (the argument is positive): shift left:
-          builder.CreateShl(
-              // The right shift of the argument by the fractional part, i.e. the fractional part is removed
-              builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
-              // By the amount of bits in fractional part. At this point, the fractional part is removed
-              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
-          // If false (the argument is negative): shift right:
-          builder.CreateShl(
-              // Add:
-              builder.CreateAdd(
-                  // The right shift of the argument by the fractional part, i.e. the fractional part is removed
-                  builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt()),
-                  // To the constant 1. This is needed because the number is encoded in two's complement
-                  llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 1)),
-              // By the amount of bits in fractional part. At this point, the fractional part is removed
-              ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt())));
+  } else {
+    // If unsigned skip positive/negative check
+    inst = builder.CreateSelect(
+        // Compare:
+        builder.CreateICmpEQ(
+            // The fractional part of the argument
+            builder.CreateShl(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarIntegerBitsAmt(), "frac_part"),
+            // The constant 0
+            llvm::ConstantInt::get(llvm::Type::getIntNTy(cont, arg_type->getPrimitiveSizeInBits()), 0), "frac_part_is_zero"),
+        // If true (fractional part was already 0), return the argument
+        inst,
+        // If false (fractional part was nonzero):
+        builder.CreateShl(
+            // The right shift of the argument by the fractional part, i.e. the fractional part is removed
+            builder.CreateLShr(inst, ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "integer_part"),
+            // By the amount of bits in fractional part. At this point, the fractional part is removed
+            ref->valueInfo(oldf->getArg(0))->fixpType.scalarFracBitsAmt(), "arg_final"),
+        "return_value");
+  }
 
   LLVM_DEBUG(dbgs() << "Trunc logic created.\n");
 
@@ -909,7 +934,11 @@ bool FloatToFixed::convertLibmFunction(
     return createACos(this, NewFunc, OldFunc);
   }
 
-  // Exp and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  // Exp, expm1 and exp2 are handled by the same function. Lazy evaluation should make us fall into the right case.
+  if (taffo::start_with(fName, "expm1")) {
+    return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Expm1);
+  }
+
   if (taffo::start_with(fName, "exp2")) {
     return createExp(this, NewFunc, OldFunc, flttofix::ExpFunType::Exp2);
   }

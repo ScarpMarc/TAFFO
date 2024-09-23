@@ -139,8 +139,10 @@ range_ptr_t
 taffo::handleMathCallInstruction(const std::list<range_ptr_t> &ops,
                                  const std::string &function)
 {
+  std::string function_stripped = function.substr(0, function.find('.'));
   const auto it = std::find_if(functionWhiteList.cbegin(), functionWhiteList.cend(),
-                               [&function](const std::pair<const std::string, map_value_t> &whiteList) { return function.find(whiteList.first) == 0; });
+                               [&function_stripped](const std::pair<const std::string, map_value_t> &whiteList) {                               
+                                return whiteList.first.find(function_stripped) == 0; });
 
   if (it != functionWhiteList.cend()) {
     return it->second(ops);

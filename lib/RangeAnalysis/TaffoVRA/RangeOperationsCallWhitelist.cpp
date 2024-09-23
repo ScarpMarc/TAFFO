@@ -135,6 +135,32 @@ handleCallToExp(const std::list<range_ptr_t> &operands)
 }
 
 static range_ptr_t
+handleCallToExp2(const std::list<range_ptr_t> &operands)
+{
+  assert(operands.size() == 1 && "too many operands in function Exp");
+  range_ptr_t op = operands.front();
+  if (!op) {
+    return nullptr;
+  }
+  num_t min = static_cast<num_t>(exp2(static_cast<double>(op->min())));
+  num_t max = static_cast<num_t>(exp2(static_cast<double>(op->max())));
+  return make_range(min, max);
+}
+
+static range_ptr_t
+handleCallToExpm1(const std::list<range_ptr_t> &operands)
+{
+  assert(operands.size() == 1 && "too many operands in function Exp");
+  range_ptr_t op = operands.front();
+  if (!op) {
+    return nullptr;
+  }
+  num_t min = static_cast<num_t>(expm1(static_cast<double>(op->min())));
+  num_t max = static_cast<num_t>(expm1(static_cast<double>(op->max())));
+  return make_range(min, max);
+}
+
+static range_ptr_t
 handleCallToSin(const std::list<range_ptr_t> &operands)
 {
   assert(operands.size() == 1 && "too many operands in function Sin");
@@ -239,6 +265,8 @@ const std::map<const std::string, map_value_t> taffo::functionWhiteList = {
     CMATH_WHITELIST_FUN("log2", &handleCallToLog2f),
     CMATH_WHITELIST_FUN("sqrt", &handleCallToSqrt),
     CMATH_WHITELIST_FUN("exp", &handleCallToExp),
+    CMATH_WHITELIST_FUN("exp2", &handleCallToExp2),
+    CMATH_WHITELIST_FUN("expm1", &handleCallToExpm1),
     CMATH_WHITELIST_FUN("sin", &handleCallToSin),
     CMATH_WHITELIST_FUN("cos", &handleCallToCos),
     CMATH_WHITELIST_FUN("acos", &handleCallToAcos),
