@@ -47,47 +47,57 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         return partialSpecialCall(newfs, foundRet, fxpret);
     }
 
-    LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
-
     auto internal_fxpt = flttofix::FixedPointType(true, flttofix::cordic_sqrt_internal_width_fractional, flttofix::cordic_sqrt_internal_width);
 
-    auto int_type_wide = internal_fxpt.scalarToLLVMType(cont);
-    LLVM_DEBUG(dbgs() << "Internal fixed point type: ");
-    int_type_wide->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "fxpret: " << fxpret.scalarBitsAmt() << " frac part: " << fxpret.scalarFracBitsAmt() << " difference: " << fxpret.scalarBitsAmt() - fxpret.scalarFracBitsAmt() << "\n");
+    LLVM_DEBUG(dbgs() << "fxparg: " << fxparg.scalarBitsAmt() << " frac part: " << fxparg.scalarFracBitsAmt() << " difference: " << fxparg.scalarBitsAmt() - fxparg.scalarFracBitsAmt() << "\n");
+    LLVM_DEBUG(dbgs() << "Internal fixed point type: " << internal_fxpt.scalarBitsAmt() << " frac part: " << internal_fxpt.scalarFracBitsAmt() << " difference: " << internal_fxpt.scalarBitsAmt() - internal_fxpt.scalarFracBitsAmt() << "\n");
+
+    auto int_type_arg = fxparg.scalarToLLVMType(cont);
+    LLVM_DEBUG(dbgs() << "Argument fixed point type: ");
+    int_type_arg->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto int_type_narrow = fxpret.scalarToLLVMType(cont);
+    auto int_type_ret = fxpret.scalarToLLVMType(cont);
     LLVM_DEBUG(dbgs() << "Return fixed point type: ");
-    int_type_narrow->print(dbgs(), true);
+    int_type_ret->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
+
+    auto int_type_internal = internal_fxpt.scalarToLLVMType(cont);
+    LLVM_DEBUG(dbgs() << "internal fixed point type: ");
+    int_type_internal->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "\n");
+
+
+
 
     // Generate strings for constants names
     std::string S_arg_point = "." + std::to_string(fxparg.scalarFracBitsAmt());
     std::string S_ret_point = "." + std::to_string(fxpret.scalarFracBitsAmt());
-    std::string S_int_point = "." + std::to_string(internal_fxpt.scalarFracBitsAmt());
 
     // ----------------------------------------------------
 
     // The pointer to the value that is actually returned.
-    Value *return_value_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "return_value_ptr");
+    Value *return_value_ptr = builder.CreateAlloca(int_type_ret, nullptr, "return_value_ptr");
 
     // Pointer to the argument
-    Value *arg_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "arg");
+    Value *arg_ptr = builder.CreateAlloca(int_type_arg, nullptr, "arg");
     builder.CreateStore(newfs->getArg(0), arg_ptr);
 
     LLVM_DEBUG(dbgs() << "arg_ptr: ");
     arg_ptr->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    LLVM_DEBUG(dbgs() << "Argument is unsigned: shifting it to the right by 1 bit\n");
-    builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_narrow, 1), "arg_shifted_was_unsigned"), arg_ptr);
-    fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
-    fxparg.scalarIsSigned() = true;
+    // LLVM_DEBUG(dbgs() << "Argument is unsigned: shifting it to the right by 1 bit\n");
+    // builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_arg, 1), "arg_shifted_was_unsigned"), arg_ptr);
+    // fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
+    // fxparg.scalarIsSigned() = true;
+
 
     // ----------------------------------------------------
     // Some variables we will need to handle special cases.
     // More variables will be declared later.
-
+    /*
     // Pointer to one (for comparison with the argument)
     TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr_arg(fxparg);
     bool one_ptr_arg_created = TaffoMath::createFixedPointFromConst(
@@ -104,7 +114,7 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         one_ptr_ret.value = TaffoMath::createGlobalConst(
             M, "one_ptr_arg" + S_arg_point, one_ptr_ret.fpt.scalarToLLVMType(cont), one_ptr_ret.value,
             dataLayout.getPrefTypeAlignment(one_ptr_ret.fpt.scalarToLLVMType(cont)));
-
+    */
     // ----------------------------------------------------
     // Basic blocks
 
@@ -139,7 +149,7 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
 
     // Blocks for special cases
-
+    /*
     BasicBlock *checkArgIsZero = BasicBlock::Create(cont, "check_arg_is_zero", newfs);
     BasicBlock *argIsZero = BasicBlock::Create(cont, "arg_is_zero", newfs);
 
@@ -148,7 +158,7 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     BasicBlock *checkArgIsNegative = BasicBlock::Create(cont, "check_arg_is_negative", newfs);
     BasicBlock *argIsNegative = BasicBlock::Create(cont, "arg_is_negative", newfs);
-
+    */
 
     // TODO arg boundaries and special cases
 
@@ -164,312 +174,359 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // The argument is created above
 
     // The two updaters that oscillate
-    TaffoMath::pair_ftp_value<llvm::Value *> x_ptr(internal_fxpt);
-    TaffoMath::pair_ftp_value<llvm::Value *> y_ptr(internal_fxpt);
-    x_ptr.value = builder.CreateAlloca(int_type_wide, nullptr, "x");
-    y_ptr.value = builder.CreateAlloca(int_type_wide, nullptr, "y");
+    TaffoMath::pair_ftp_value<llvm::Value *> x_ptr(fxpret);
+    TaffoMath::pair_ftp_value<llvm::Value *> y_ptr(fxpret);
+    x_ptr.value = builder.CreateAlloca(int_type_ret, nullptr, "x");
+    y_ptr.value = builder.CreateAlloca(int_type_ret, nullptr, "y");
 
-    Value *k_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "k");
+    TaffoMath::pair_ftp_value<llvm::Value *> k_ptr(internal_fxpt);
+    k_ptr.value = builder.CreateAlloca(int_type_internal, nullptr, "k");
 
     // pointer to the current iteration counter
-    Value *i_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "i_ptr");
+    TaffoMath::pair_ftp_value<llvm::Value *> i_ptr(internal_fxpt);
+    i_ptr.value = builder.CreateAlloca(int_type_internal, nullptr, "i_ptr");
 
     // pointer to the shift amount in the preparation loop
-    Value *shift_pre_ptr = builder.CreateAlloca(int_type_narrow, nullptr, "shift_pre_ptr");
+    TaffoMath::pair_ftp_value<llvm::Value *> shift_pre_ptr(internal_fxpt);
+    shift_pre_ptr.value = builder.CreateAlloca(int_type_internal, nullptr, "shift_pre_ptr");
 
-    Value *output_temp;
-
-    // Pointer to 0.5 in the internal (wide) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> lower_ptr_wide(internal_fxpt);
     // Pointer to 0.5 in the return (narrow) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> lower_ptr_narrow(fxpret);
-    // Pointer to 2 in the internal (wide) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> upper_ptr_wide(internal_fxpt);
+    TaffoMath::pair_ftp_value<llvm::Constant *> lower_ptr(fxparg);
     // Pointer to 2 in the return (narrow) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> upper_ptr_narrow(fxpret);
-    // Pointer to zero in the internal (wide) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr_wide(internal_fxpt);
+    TaffoMath::pair_ftp_value<llvm::Constant *> upper_ptr(fxparg);
     // Pointer to zero in the return (narrow) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr_narrow(fxpret);
-    // Pointer to 0.25 in the internal (wide) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> quarter_ptr_wide(internal_fxpt);
+    TaffoMath::pair_ftp_value<llvm::Constant *> zero_ptr(fxpret);
     // Pointer to 0.25 in the return (narrow) fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> quarter_ptr_narrow(fxpret);
+    TaffoMath::pair_ftp_value<llvm::Constant *> quarter_ptr(fxpret);
+    // Pointer to 4 in the return (narrow) fixed point type
+    TaffoMath::pair_ftp_value<llvm::Constant *> four_ptr(fxpret);
+    // Pointer to 1 in the return (narrow) fixed point type
+    TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr(fxparg);
+    // Pointer to 2 in the return fixed point type
+    TaffoMath::pair_ftp_value<llvm::Constant *> two_ptr(fxpret);
+    // Pointer to An
+    TaffoMath::pair_ftp_value<llvm::Constant *> An_ptr(fxpret);
+
 
     // ----------------------------------------------------
 
-    // Create the constants 0.5 and 2 and 0 and 0.25
-    bool lower_ptr_wide_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 0.5, internal_fxpt, lower_ptr_wide.value, lower_ptr_wide.fpt);
-    bool lower_ptr_narrow_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 0.5, fxpret, lower_ptr_narrow.value, lower_ptr_narrow.fpt);
-    bool upper_ptr_wide_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 2.0, internal_fxpt, upper_ptr_wide.value, upper_ptr_wide.fpt);
-    bool upper_ptr_narrow_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 2.0, fxpret, upper_ptr_narrow.value, upper_ptr_narrow.fpt);
-    bool zero_ptr_wide_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, TaffoMath::zero, internal_fxpt, zero_ptr_wide.value, zero_ptr_wide.fpt);
-    bool zero_ptr_narrow_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, TaffoMath::zero, fxpret, zero_ptr_narrow.value, zero_ptr_narrow.fpt);
-    bool quarter_ptr_wide_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 0.25, internal_fxpt, quarter_ptr_wide.value, quarter_ptr_wide.fpt);
-    bool quarter_ptr_narrow_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 0.25, fxpret, quarter_ptr_narrow.value, quarter_ptr_narrow.fpt);
+    // Create the constants
+    bool lower_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 0.5, fxparg, lower_ptr.value, lower_ptr.fpt);
+    bool upper_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 2.0, fxparg, upper_ptr.value, upper_ptr.fpt);
+    bool zero_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, TaffoMath::zero, fxpret, zero_ptr.value, zero_ptr.fpt);
+    bool quarter_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 0.25, fxpret, quarter_ptr.value, quarter_ptr.fpt);
+    bool four_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 4.0, fxparg, four_ptr.value, four_ptr.fpt);
+    bool one_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 1.0, fxparg, one_ptr.value, one_ptr.fpt);
+    bool two_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, 2.0, fxpret, two_ptr.value, two_ptr.fpt);
+    bool An_ptr_created = TaffoMath::createFixedPointFromConst(
+        cont, ref, flttofix::compute_An(fxpret.scalarFracBitsAmt()), fxpret, An_ptr.value, An_ptr.fpt);
+  
 
-    if (!(lower_ptr_wide_created && lower_ptr_narrow_created && upper_ptr_wide_created && upper_ptr_narrow_created && zero_ptr_wide_created && zero_ptr_narrow_created && quarter_ptr_wide_created && quarter_ptr_narrow_created)) {
+    if (!(lower_ptr_created && upper_ptr_created
+        && zero_ptr_created && quarter_ptr_created
+        && four_ptr_created && one_ptr_created 
+        && two_ptr_created && An_ptr_created)) {
         LLVM_DEBUG(dbgs() << "===== ERROR: Could not create one or more of the initialisation constants\n");
         llvm_unreachable("Could not create one or more of the initialisation constants. Sqrt cannot continue.");
         return false;
     }
 
-    lower_ptr_wide.value = TaffoMath::createGlobalConst(
-        M, "lower_ptr_wide" + S_int_point, lower_ptr_wide.fpt.scalarToLLVMType(cont), lower_ptr_wide.value,
-        dataLayout.getPrefTypeAlignment(lower_ptr_wide.fpt.scalarToLLVMType(cont)));
-    lower_ptr_narrow.value = TaffoMath::createGlobalConst(
-        M, "lower_ptr_narrow" + S_ret_point, lower_ptr_narrow.fpt.scalarToLLVMType(cont), lower_ptr_narrow.value,
-        dataLayout.getPrefTypeAlignment(lower_ptr_narrow.fpt.scalarToLLVMType(cont)));
-    upper_ptr_wide.value = TaffoMath::createGlobalConst(
-        M, "upper_ptr_wide" + S_int_point, upper_ptr_wide.fpt.scalarToLLVMType(cont), upper_ptr_wide.value,
-        dataLayout.getPrefTypeAlignment(upper_ptr_wide.fpt.scalarToLLVMType(cont)));
-    upper_ptr_narrow.value = TaffoMath::createGlobalConst(
-        M, "upper_ptr_narrow" + S_ret_point, upper_ptr_narrow.fpt.scalarToLLVMType(cont), upper_ptr_narrow.value,
-        dataLayout.getPrefTypeAlignment(upper_ptr_narrow.fpt.scalarToLLVMType(cont)));
-    zero_ptr_wide.value = TaffoMath::createGlobalConst(
-        M, "zero_ptr_wide" + S_int_point, zero_ptr_wide.fpt.scalarToLLVMType(cont), zero_ptr_wide.value,
-        dataLayout.getPrefTypeAlignment(zero_ptr_wide.fpt.scalarToLLVMType(cont)));
-    zero_ptr_narrow.value = TaffoMath::createGlobalConst(
-        M, "zero_ptr_narrow" + S_ret_point, zero_ptr_narrow.fpt.scalarToLLVMType(cont), zero_ptr_narrow.value,
-        dataLayout.getPrefTypeAlignment(zero_ptr_narrow.fpt.scalarToLLVMType(cont)));
+    lower_ptr.value = TaffoMath::createGlobalConst(
+        M, "lower_ptr" + S_arg_point, lower_ptr.fpt.scalarToLLVMType(cont), lower_ptr.value,
+        dataLayout.getPrefTypeAlignment(lower_ptr.fpt.scalarToLLVMType(cont)));
+    upper_ptr.value = TaffoMath::createGlobalConst(
+        M, "upper_ptr" + S_arg_point, upper_ptr.fpt.scalarToLLVMType(cont), upper_ptr.value,
+        dataLayout.getPrefTypeAlignment(upper_ptr.fpt.scalarToLLVMType(cont)));
+    zero_ptr.value = TaffoMath::createGlobalConst(
+        M, "zero_ptr" + S_ret_point, zero_ptr.fpt.scalarToLLVMType(cont), zero_ptr.value,
+        dataLayout.getPrefTypeAlignment(zero_ptr.fpt.scalarToLLVMType(cont)));
+    quarter_ptr.value = TaffoMath::createGlobalConst(
+        M, "quarter_ptr" + S_ret_point, quarter_ptr.fpt.scalarToLLVMType(cont), quarter_ptr.value,
+        dataLayout.getPrefTypeAlignment(quarter_ptr.fpt.scalarToLLVMType(cont)));
+    four_ptr.value = TaffoMath::createGlobalConst(
+        M, "four_ptr" + S_ret_point, four_ptr.fpt.scalarToLLVMType(cont), four_ptr.value,
+        dataLayout.getPrefTypeAlignment(four_ptr.fpt.scalarToLLVMType(cont)));
+    one_ptr.value = TaffoMath::createGlobalConst(
+        M, "one_ptr" + S_arg_point, one_ptr.fpt.scalarToLLVMType(cont), one_ptr.value,
+        dataLayout.getPrefTypeAlignment(one_ptr.fpt.scalarToLLVMType(cont)));
+    two_ptr.value = TaffoMath::createGlobalConst(
+        M, "two_ptr" + S_ret_point, two_ptr.fpt.scalarToLLVMType(cont), two_ptr.value,
+        dataLayout.getPrefTypeAlignment(two_ptr.fpt.scalarToLLVMType(cont)));
+    
 
     // ----------------------------------------------------
     LLVM_DEBUG(dbgs() << "Starting preparation loop"
                     << "\n");
 
-    auto lower_value_wide = builder.CreateLoad(getElementTypeFromValuePointer(lower_ptr_wide.value), lower_ptr_wide.value, "lower_wide");
-    LLVM_DEBUG(dbgs() << "lower_value_wide: ");
-    lower_value_wide->print(dbgs(), true);
+    auto lower_value = builder.CreateLoad(getElementTypeFromValuePointer(lower_ptr.value), lower_ptr.value, "lower");
+    LLVM_DEBUG(dbgs() << "lower_value: ");
+    lower_value->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto lower_value_narrow = builder.CreateLoad(getElementTypeFromValuePointer(lower_ptr_narrow.value), lower_ptr_narrow.value, "lower_narrow");
-    LLVM_DEBUG(dbgs() << "lower_value_narrow: ");
-    lower_value_narrow->print(dbgs(), true);
+    auto upper_value = builder.CreateLoad(getElementTypeFromValuePointer(upper_ptr.value), upper_ptr.value, "upper");
+    LLVM_DEBUG(dbgs() << "upper_value: ");
+    upper_value->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto upper_value_wide = builder.CreateLoad(getElementTypeFromValuePointer(upper_ptr_wide.value), upper_ptr_wide.value, "upper_wide");
-    LLVM_DEBUG(dbgs() << "upper_value_wide: ");
-    upper_value_wide->print(dbgs(), true);
+    auto zero_value = builder.CreateLoad(getElementTypeFromValuePointer(zero_ptr.value), zero_ptr.value, "zero");
+    LLVM_DEBUG(dbgs() << "zero_value: ");
+    zero_value->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    auto upper_value_narrow = builder.CreateLoad(getElementTypeFromValuePointer(upper_ptr_narrow.value), upper_ptr_narrow.value, "upper_narrow");
-    LLVM_DEBUG(dbgs() << "upper_value_narrow: ");
-    upper_value_narrow->print(dbgs(), true);
-    LLVM_DEBUG(dbgs() << "\n");
-
-    auto zero_value_wide = builder.CreateLoad(getElementTypeFromValuePointer(zero_ptr_wide.value), zero_ptr_wide.value, "zero_wide");
-    LLVM_DEBUG(dbgs() << "zero_value_wide: ");
-    zero_value_wide->print(dbgs(), true);
-    LLVM_DEBUG(dbgs() << "\n");
-
-    auto zero_value_narrow = builder.CreateLoad(getElementTypeFromValuePointer(zero_ptr_narrow.value), zero_ptr_narrow.value, "zero_narrow");
-    LLVM_DEBUG(dbgs() << "zero_value_narrow: ");
-    zero_value_narrow->print(dbgs(), true);
-    LLVM_DEBUG(dbgs() << "\n");
-
+    auto two_value = builder.CreateLoad(getElementTypeFromValuePointer(two_ptr.value), two_ptr.value, "two");
 
     LLVM_DEBUG(dbgs() << "Boundaries set"
                     << "\n");
 
-    builder.CreateStore(zero_value_narrow, shift_pre_ptr);
+    builder.CreateStore(ConstantInt::get(int_type_internal, 0), shift_pre_ptr.value);
 
+    Value *arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "curr_arg_val");
+    Value *shift_pre_value = builder.CreateAlloca(int_type_internal, nullptr, "shift_pre_value");
+    shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift_pre_value");
     // ----------------------------------------------------
     // First loop: condition < 0.5
 
     builder.CreateBr(check_small_arg);
-    builder.SetInsertPoint(check_small_arg);
+    {
+        builder.SetInsertPoint(check_small_arg);
 
-    auto shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr), shift_pre_ptr, "shift_pre_value");
+        shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift_pre_value");
 
-    auto arg_value_narrow = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "curr_arg_val_narrow_preloop");
-    Value *arg_value_wide = builder.CreateShl(builder.CreateSExt(arg_value_narrow, int_type_wide, "sign_extended_arg_preloop"), internal_fxpt.scalarFracBitsAmt() - fxparg.scalarFracBitsAmt(), "curr_arg_val_wide_preloop");
+        arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "curr_arg_val_narrow_preloop");
 
-    Value *isLessThanLower = builder.CreateICmpSLT(
-        arg_value_narrow,
-        lower_value_narrow, "loop_condition_preloop_lower");
+        Value *isLessThanLower = builder.CreateICmpSLT(
+            arg_value,
+            lower_value, "loop_condition_preloop_lower");
 
-    builder.CreateCondBr(isLessThanLower, preparation_loop_lower,
-                        check_big_arg);
+        builder.CreateCondBr(isLessThanLower, preparation_loop_lower,
+                            check_big_arg);
+    }
     
-    builder.SetInsertPoint(preparation_loop_lower);
+    {
+        builder.SetInsertPoint(preparation_loop_lower);
 
-    // Shift the argument right by 2 bits
-    output_temp = builder.CreateAShr(arg_value_wide, ConstantInt::get(int_type_wide, 2), "arg_value_shifted_preloop_lower");
-    builder.CreateStore(output_temp, arg_ptr);
+        // Shift the argument left by 2 bits
+        arg_value = builder.CreateShl(arg_value, ConstantInt::get(int_type_arg, 2), "arg_value_shifted_preloop_lower");
 
-    // augument shift_pre by 2
+        // augument shift_pre by 2
 
-    output_temp = builder.CreateAdd(shift_pre_value, ConstantInt::get(int_type_narrow, 2), "shift_pre_value_lower");
-    
-    // Store the new value of the argument
-    builder.CreateStore(output_temp, shift_pre_ptr);
+        //shift_pre_value = builder.CreateAdd(shift_pre_value, ConstantInt::get(int_type_ret, 2), "shift_pre_value_lower");
+        
+        // Store the new value of the argument
+        builder.CreateStore(builder.CreateAdd(shift_pre_value, ConstantInt::get(int_type_internal, 2), "shift_pre_value_lower"), shift_pre_ptr.value);
+        builder.CreateStore(arg_value, arg_ptr);
 
-    builder.CreateBr(check_small_arg);
+        builder.CreateBr(check_small_arg);
+
+    }
 
     // ----------------------------------------------------
 
     // Second loop: condition >= 2
+    {
 
-    builder.SetInsertPoint(check_big_arg);
+        builder.SetInsertPoint(check_big_arg);
 
-    auto isGreaterThanUpper = builder.CreateICmpSGE(
-        arg_value_narrow,
-        upper_value_narrow, "loop_condition_preloop_upper");
+        shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift_pre_value");
+
+        arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "curr_arg_val_narrow_preloop");
+
+        auto isGreaterThanUpper = builder.CreateICmpSGE(
+            arg_value,
+            upper_value, "loop_condition_preloop_upper");
+        
+        builder.CreateCondBr(isGreaterThanUpper, preparation_loop_upper,
+                            init_main);
+
+    }
+
+    {
     
-    builder.CreateCondBr(isGreaterThanUpper, preparation_loop_upper,
-                        init_main);
-    
-    builder.SetInsertPoint(preparation_loop_upper);
+        builder.SetInsertPoint(preparation_loop_upper);
 
-    // Shift the argument left by 2 bits
-    output_temp = builder.CreateShl(arg_value_wide, ConstantInt::get(int_type_wide, 2), "arg_value_shifted_preloop_upper");
-    builder.CreateStore(output_temp, arg_ptr);
+        // Shift the argument right by 2 bits
+        arg_value = builder.CreateAShr(arg_value, ConstantInt::get(int_type_arg, 2), "arg_value_shifted_preloop_upper");
 
-    // diminish shift_pre by 2
+        // diminish shift_pre by 2
 
-    output_temp = builder.CreateSub(shift_pre_value, ConstantInt::get(int_type_narrow, 2), "shift_pre_value_upper");
+        //shift_pre_value = builder.CreateSub(shift_pre_value, ConstantInt::get(int_type_ret, 2), "shift_pre_value_upper");
 
-    // Store the new value of the argument
-    builder.CreateStore(output_temp, shift_pre_ptr);
+        auto shift_type = shift_pre_value->getType();
+        LLVM_DEBUG(dbgs() << "Shift type: ");
+        shift_type->print(dbgs(), true);
+        LLVM_DEBUG(dbgs() << "\n");
+            
+        // Store the new value of the argument
+        builder.CreateStore(builder.CreateSub(shift_pre_value, ConstantInt::get(int_type_internal, 2), "shift_pre_value_upper"), shift_pre_ptr.value);
+        builder.CreateStore(arg_value, arg_ptr);
 
-    builder.CreateBr(check_big_arg);
+        builder.CreateBr(check_big_arg);
+
+    }
 
 
     // ----------------------------------------------------
     // Main loop initialisation
+    {
 
-    builder.SetInsertPoint(init_main);
+        builder.SetInsertPoint(init_main);
 
-    // Set the iterator to 1
-    builder.CreateStore(ConstantInt::get(int_type_narrow, 1), i_ptr);
+        // Shift argument value to be return type
+        arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value");
+        
+        if (fxparg.scalarFracBitsAmt() < fxpret.scalarFracBitsAmt()) {
+            builder.CreateStore(builder.CreateShl(arg_value, fxpret.scalarFracBitsAmt() - fxparg.scalarFracBitsAmt(), "ret_value_init"), return_value_ptr);
+        }
+        else
+        {
+            builder.CreateStore(builder.CreateAShr(arg_value, fxparg.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt(), "ret_value_init"), return_value_ptr);
+        }
 
-    // Set the x and y values to arg + 0.25 and arg - 0.25 
-    auto arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value");
-    auto arg_value_wide = builder.CreateShl(builder.CreateSExt(arg_value, int_type_wide, "sign_extended_arg"), internal_fxpt.scalarFracBitsAmt() - fxparg.scalarFracBitsAmt(), "arg_value_wide");
+        Value *return_value = builder.CreateAlloca(int_type_ret, nullptr, "return_value");
+        builder.CreateStore(builder.CreateLoad(getElementTypeFromValuePointer(return_value_ptr), return_value_ptr, "ret_value_init"), return_value);
 
-    // x = arg + 0.25
-    auto x_value = builder.CreateAdd(arg_value_wide, builder.CreateLoad(getElementTypeFromValuePointer(quarter_ptr_wide.value), quarter_ptr_wide.value, "quarter_wide"), "x_value");
-    builder.CreateStore(x_value, x_ptr.value);
+        // Set the iterator to 1
+        //auto one_value = builder.CreateLoad(getElementTypeFromValuePointer(one_ptr.value), one_ptr.value, "one");
+        builder.CreateStore(ConstantInt::get(int_type_internal, 1), i_ptr.value);
 
-    // y = arg - 0.25
-    auto y_value = builder.CreateSub(arg_value_wide, builder.CreateLoad(getElementTypeFromValuePointer(quarter_ptr_wide.value), quarter_ptr_wide.value, "quarter_wide"), "y_value");
-    builder.CreateStore(y_value, y_ptr.value);
+        // Set the x and y values to arg + 0.25 and arg - 0.25 
 
-    // Temp values to store updates
-    Value *x_update;
-    Value *y_update;
-    Value *k_value;
-    
-    // set k to 4
-    builder.CreateStore(ConstantInt::get(int_type_narrow, 4), k_ptr);
+        // x = arg + 0.25
+        auto x_value = builder.CreateAdd(builder.CreateLoad(getElementTypeFromValuePointer(return_value), return_value), builder.CreateLoad(getElementTypeFromValuePointer(quarter_ptr.value), quarter_ptr.value, "quarter_wide"), "x_value");
+        builder.CreateStore(x_value, x_ptr.value);
+
+        // y = arg - 0.25
+        auto y_value = builder.CreateSub(builder.CreateLoad(getElementTypeFromValuePointer(return_value), return_value), builder.CreateLoad(getElementTypeFromValuePointer(quarter_ptr.value), quarter_ptr.value, "quarter_wide"), "y_value");
+        builder.CreateStore(y_value, y_ptr.value);
+
+        // Temp values to store updates
+        // Value *x_update = builder.CreateAlloca(int_type_ret, nullptr, "x_update_value");
+        // Value *y_update = builder.CreateAlloca(int_type_ret, nullptr, "y_update_value");
+        // Value *k_value;
+        
+        // set k to 4
+        //auto four_value = builder.CreateLoad(getElementTypeFromValuePointer(four_ptr.value), four_ptr.value, "four_narrow");
+        builder.CreateStore(ConstantInt::get(int_type_internal, 4), k_ptr.value);
+
+        builder.CreateBr(check_loop);
+
+    }
 
     // ----------------------------------------------------
 
-    LLVM_DEBUG(dbgs() << "Start loop"
+    {
+        builder.SetInsertPoint(check_loop);
+
+        LLVM_DEBUG(dbgs() << "Start loop"
                     << "\n");
 
-    builder.CreateBr(check_loop);
-    builder.SetInsertPoint(check_loop);
+        auto i_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr.value), i_ptr.value, "i_value");
 
-    auto i_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr), i_ptr, "i_value");
-    auto i_value_wide = builder.CreateZExt(
-        i_value, int_type_wide, "i_value_wide");
+        // Check whether i < cordic_sqrt_total_iterations; if so, go to loop body. Else, go to the end of the function.
+        Value *iIsLessThanN = builder.CreateICmpSLT(
+            i_value,
+            ConstantInt::get(int_type_internal, fxpret.scalarFracBitsAmt()), "loop_condition");
+        
+        builder.CreateCondBr(iIsLessThanN, loop_body,
+                            end);
 
-    // Check whether i < cordic_sqrt_total_iterations; if so, go to loop body. Else, go to the end of the function.
-    Value *iIsLessThanN = builder.CreateICmpSLE(
-        i_value,
-        ConstantInt::get(int_type_narrow, flttofix::cordic_sqrt_total_iterations), "loop_condition");
-    
-    builder.CreateCondBr(iIsLessThanN, loop_body,
-                        end);
+    }
 
 
     // Loop body
-    
-    builder.SetInsertPoint(loop_body);
+    {
+        builder.SetInsertPoint(loop_body);
 
-    // Current argument value
-    auto arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value_curr");
-    auto arg_value_wide = builder.CreateShl(builder.CreateSExt(arg_value, int_type_wide, "sign_extended_arg"), internal_fxpt.scalarFracBitsAmt() - fxparg.scalarFracBitsAmt(), "arg_value_wide_curr");
+        // Current argument value
+        // arg_value = builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr, "arg_value_curr");
+        // arg_value_wide = builder.CreateShl(builder.CreateSExt(arg_value, int_type_arg, "sign_extended_arg"), internal_fxpt.scalarFracBitsAmt() - fxparg.scalarFracBitsAmt(), "arg_value_wide_curr");
 
-    // Current x and y values
-    auto x_value = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_curr");
-    auto y_value = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_curr");
+        // Current x and y values
+        Value *x_value = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_curr");
+        Value *y_value = builder.CreateLoad(getElementTypeFromValuePointer(y_ptr.value), y_ptr.value, "y_curr");
 
-    // sign = y >= 0 ? -1 : 1;
-    // Shift right until we get the most significant bit only
-    Value *update_sign = builder.CreateSelect(
-        builder.CreateICmpSGT(y_value, zero_value_wide, "arg_is_positive"),
-        ConstantInt::get(int_type_wide, -1), ConstantInt::get(int_type_wide, 1), "update_sign");
+        // sign = y >= 0 ? -1 : 1;
+        // Shift right until we get the most significant bit only
+        Value *update_sign = builder.CreateSelect(
+            builder.CreateICmpSGT(y_value, zero_value, "arg_is_positive"),
+            ConstantInt::get(int_type_ret, -1), ConstantInt::get(int_type_ret, 1), "update_sign");
 
-    // update_sign > 0 ?
-    auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_value_wide, "update_sign_greater_zero");
+        // update_sign > 0 ?
+        auto update_sign_greater_zero = builder.CreateICmpSGT(update_sign, zero_value, "update_sign_greater_zero");
 
-    // sign = y >= 0 ? -1 : 1;
-    Value *update_sign_narrow = builder.CreateSelect(
-        builder.CreateICmpSGT(y_value, zero_value_wide, "arg_is_positive_narrow"),
-        ConstantInt::get(int_type_narrow, -1), ConstantInt::get(int_type_narrow, 1), "update_sign_narrow");
-    
-    // update_sign > 0 ?
-    auto update_sign_greater_zero_narrow = builder.CreateICmpSGT(update_sign_narrow, zero_value_narrow, "update_sign_greater_zero_narrow");
+        LLVM_DEBUG(dbgs() << "Sign greater than zero set"
+                        << "\n");
 
-    LLVM_DEBUG(dbgs() << "Sign greater than zero set"
-                      << "\n");
-    
-    y_update = builder.CreateAShr(x_value, i_value_wide, "y_update");
-    x_update = builder.CreateAShr(y_value, i_value_wide, "x_update");
+        //auto shift_value = builder.CreateShl(builder.CreateLoad(getElementTypeFromValuePointer(i_ptr.value), i_ptr.value), fxpret.scalarFracBitsAmt() - flttofix::cordic_sqrt_internal_width_fractional + 1, "shift_value");
+        auto shift_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr.value), i_ptr.value, "shift_value");
+        
+        Value *y_update = builder.CreateAShr(x_value, shift_value, "y_update");
+        Value *x_update = builder.CreateAShr(y_value, shift_value, "x_update");
 
-    y_value = builder.CreateSelect(
-        update_sign_greater_zero, builder.CreateAdd(y_value, y_update, "y_update"), builder.CreateSub(y_value, y_update, "y_update"), "y_update_select");
+        y_value = builder.CreateSelect(
+            update_sign_greater_zero, builder.CreateAdd(y_value, y_update, "y_update"), builder.CreateSub(y_value, y_update, "y_update"), "y_update_select");
 
-    x_value = builder.CreateSelect(
-        update_sign_greater_zero, builder.CreateAdd(x_value, x_update, "x_update"), builder.CreateSub(x_value, x_update, "x_update"), "x_update_select");
+        x_value = builder.CreateSelect(
+            update_sign_greater_zero, builder.CreateAdd(x_value, x_update, "x_update"), builder.CreateSub(x_value, x_update, "x_update"), "x_update_select");
 
-    builder.CreateStore(y_value, y_ptr.value);
-    builder.CreateStore(x_value, x_ptr.value);
+        builder.CreateStore(y_value, y_ptr.value);
+        builder.CreateStore(x_value, x_ptr.value);
 
-    k_value = builder.CreateLoad(getElementTypeFromValuePointer(k_ptr), k_ptr, "k_value");
+        Value *k_value = builder.CreateLoad(getElementTypeFromValuePointer(k_ptr.value), k_ptr.value, "k_value");
+        Value *i_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr.value), i_ptr.value, "i_value");
 
-    Value *isIequalToK = builder.CreateICmpEQ(
-        i_value,
-        k_value, "loop_condition_k");
+        Value *isIequalToK = builder.CreateICmpEQ(
+            i_value,
+            k_value, "loop_condition_k");
 
-    builder.CreateCondBr(isIequalToK, repetition,
-                        iteration);
+        builder.CreateCondBr(isIequalToK, repetition,
+                            iteration);
+        }
 
     // ----------------------------------------------------
 
     // Repetition block
 
-    builder.SetInsertPoint(repetition);
+    {
 
-    // k = 3 * k + 1
-    k_value = builder.CreateLoad(getElementTypeFromValuePointer(k_ptr), k_ptr, "k_value_repetition");
-    k_value = builder.CreateAdd(builder.CreateShl(k_value, ConstantInt::get(int_type_narrow, 1), "k_shifted"), k_value, "3_times_k");
-    k_value = builder.CreateAdd(k_value, ConstantInt::get(int_type_narrow, 1), "3_times_k_plus_1");
-    builder.CreateStore(k_value, k_ptr);
+        builder.SetInsertPoint(repetition);
 
-    builder.CreateBr(loop_body);
+        Value *k_value = builder.CreateLoad(getElementTypeFromValuePointer(k_ptr.value), k_ptr.value, "k_value_repetition");
+
+        // k = 3 * k + 1
+        k_value = builder.CreateLoad(getElementTypeFromValuePointer(k_ptr.value), k_ptr.value, "k_value_repetition");
+        k_value = builder.CreateAdd(builder.CreateShl(k_value, ConstantInt::get(int_type_internal, 1), "k_shifted"), k_value, "3_times_k");
+        k_value = builder.CreateAdd(k_value, ConstantInt::get(int_type_internal, 1), "3_times_k_plus_1");
+        builder.CreateStore(k_value, k_ptr.value);
+
+        builder.CreateBr(loop_body);
+
+    }
 
     // ----------------------------------------------------
 
     // Iteration block
+    {
 
-    builder.SetInsertPoint(iteration);
+        builder.SetInsertPoint(iteration);
 
-    // i = i + 1
-    i_value = builder.CreateAdd(i_value, ConstantInt::get(int_type_narrow, 1), "i_plus_1");
-    builder.CreateStore(i_value, i_ptr);
+        Value *i_value = builder.CreateLoad(getElementTypeFromValuePointer(i_ptr.value), i_ptr.value, "i_value_iteration");
 
-    builder.CreateBr(check_loop);
+        // i = i + 1
+        builder.CreateStore(builder.CreateAdd(i_value,
+                                            ConstantInt::get(int_type_internal, 1), "i_plus_1"),
+                            i_ptr.value);
+
+        builder.CreateBr(check_loop);
+    
+    }
 
     // ----------------------------------------------------
 
@@ -477,29 +534,73 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
     builder.SetInsertPoint(end);
 
-    // shift shift_pre by i
-    shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr), shift_pre_ptr, "shift_pre_value_end");
-    shift_pre_value = builder.CreateAShr(shift_pre_value, 1, "shift_pre_value_end_shifted");
+    LLVM_DEBUG(dbgs() << "Shift_pre: ");
+    shift_pre_value->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "\n");
 
-    Value* ShiftPreGreaterThanZero = builder.CreateICmpSGT(shift_pre_value, zero_value_narrow, "shift_pre_greater_than_zero");
+    // shift shift_pre by 1
+    //shift_pre_value = builder.CreateAShr(builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift_pre_value_end"), ConstantInt::get(int_type_ret, 1), "shift_pre_value_end_shifted");
+    shift_pre_value = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift_pre_value_end");
+    shift_pre_value = builder.CreateAShr(shift_pre_value, ConstantInt::get(int_type_ret, 1), "shift_pre_value_end_shifted");
+
+    LLVM_DEBUG(dbgs() << "Shift_pre_shifted: ");
+    shift_pre_value->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "\n");
+
+    Value* ShiftPreGreaterThanZero = builder.CreateICmpSGT(shift_pre_value, ConstantInt::get(int_type_ret, 0), "shift_pre_greater_than_zero");
+
+    LLVM_DEBUG(dbgs() << "Shift_gt_0: ");
+    ShiftPreGreaterThanZero->print(dbgs(), true);
+    LLVM_DEBUG(dbgs() << "\n");
 
     // Shift x left by shift_pre
-    x_value = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_end");
-    x_value = builder.CreateSelect(ShiftPreGreaterThanZero, 
-            builder.CreateShl(x_value, shift_pre_value, "x_shifted"), builder.CreateAShr(x_value, builder.CreateNeg(shift_pre_value), "x_shifted"), "x_shifted_select");
+    Value *x_value = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_end");
 
-    // TODO: multiply x by 1/An (which is the return value of the function compute_An_inv)
+    // Multiply x by 1/An (which is the return value of the function compute_An)
 
-    // Store x into return value
-    auto ret = builder.CreateLoad(getElementTypeFromValuePointer(x_ptr.value), x_ptr.value, "x_value_final");
+    std::string function_name("llvm.udiv.fix.i");
+    function_name.append(std::to_string(fxpret.scalarToLLVMType(cont)->getScalarSizeInBits()));
 
-    // Shift right the result to realign the fractional part
-    // builder.CreateLShr(arg_ptr, internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt(), "output");
-    output_temp = builder.CreateAShr(ret, ConstantInt::get(int_type_wide, internal_fxpt.scalarFracBitsAmt() - fxpret.scalarFracBitsAmt()), "arg_value_final_shifted");
+    Function *udiv = M->getFunction(function_name);
+    if (udiv == nullptr) {
+      std::vector<llvm::Type *> fun_arguments;
+      fun_arguments.push_back(
+          fxpret.scalarToLLVMType(cont)); // depends on your type
+      fun_arguments.push_back(
+          fxpret.scalarToLLVMType(cont)); // depends on your type
+      fun_arguments.push_back(Type::getInt32Ty(cont));
+      FunctionType *fun_type = FunctionType::get(
+          fxpret.scalarToLLVMType(cont), fun_arguments, false);
+      udiv = llvm::Function::Create(fun_type, GlobalValue::ExternalLinkage,
+                                    function_name, M);
+    }
 
-    builder.CreateStore(output_temp, return_value_ptr);
+    x_value = builder.CreateCall(
+        udiv, {x_value, An_ptr.value,
+               llvm::ConstantInt::get(fxpret.scalarToLLVMType(cont),
+                                      fxpret.scalarFracBitsAmt())});
 
-    builder.CreateRet(builder.CreateLoad(getElementTypeFromValuePointer(return_value_ptr), return_value_ptr));
+    builder.CreateStore(builder.CreateSelect(ShiftPreGreaterThanZero, 
+                shift_pre_value, 
+                builder.CreateSub(ConstantInt::get(int_type_internal, 0), shift_pre_value), 
+                "shift_pre_select"), shift_pre_ptr.value);
+
+    // auto shift = builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift"), fxpret.scalarFracBitsAmt(), "shift");
+    // shift = builder.CreateShl(shift, fxpret.scalarFracBitsAmt(), "shift");
+
+    auto shift = builder.CreateLoad(getElementTypeFromValuePointer(shift_pre_ptr.value), shift_pre_ptr.value, "shift");
+
+    auto x_true = builder.CreateLShr(x_value, shift, "x_shifted");
+    auto x_false = builder.CreateShl(x_value, shift, "x_shifted"); 
+
+    Value *return_value = builder.CreateSelect(ShiftPreGreaterThanZero,
+                    x_true, 
+                    x_false, 
+                    "x_shifted_select");
+
+
+    builder.CreateRet(return_value);    
+
     return true;
 }
 

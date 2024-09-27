@@ -16,22 +16,22 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 /// Number of iterations for the sqrt CORDIC algorithm
 constexpr int cordic_sqrt_iterations = TaffoMath::TABLELENGHT;
 /// Width of the extended, internal representation for the sqrt CORDIC algorithm
-const int cordic_sqrt_internal_width = 64;
+const int cordic_sqrt_internal_width = 32;
 /// Fractional part of the internal representation for the sqrt CORDIC algorithm. We estimate we need 22 bits for the integer part + 1 for the sign.
-const int cordic_sqrt_internal_width_fractional = 64 - 23;
+const int cordic_sqrt_internal_width_fractional = 0; //cordic_sqrt_internal_width - 23;
     
-constexpr double compute_An_inv(const int &n)
+constexpr double compute_An(const int &n)
 {
     double An = 1.0;
     for (int i = 1; i < n; i++)
     {
-        An *= std::sqrt(1 + std::pow(2, -2 * i));
+        An *= std::sqrt(1 - std::pow(2, -2 * i));
         if (i == 4 || i == 13 || i==40)
         {
-            An *= std::sqrt(1 + std::pow(2, -2 * i));
+            An *= std::sqrt(1 - std::pow(2, -2 * i));
         }
     }
-    return 1.0 / An;
+    return An;
 }
 
 } // namespace flttofix
