@@ -88,34 +88,14 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     arg_ptr->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
 
-    // LLVM_DEBUG(dbgs() << "Argument is unsigned: shifting it to the right by 1 bit\n");
-    // builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_arg, 1), "arg_shifted_was_unsigned"), arg_ptr);
-    // fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
-    // fxparg.scalarIsSigned() = true;
+    if (!fxparg.scalarIsSigned()) {
+        LLVM_DEBUG(dbgs() << "Argument is unsigned: shifting it to the right by 1 bit\n");
+        builder.CreateStore(builder.CreateLShr(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_arg, 1), "arg_shifted_was_unsigned"), arg_ptr);
+        fxparg.scalarFracBitsAmt() = fxparg.scalarFracBitsAmt() - 1;
+        fxparg.scalarIsSigned() = true;
+    }
 
 
-    // ----------------------------------------------------
-    // Some variables we will need to handle special cases.
-    // More variables will be declared later.
-    /*
-    // Pointer to one (for comparison with the argument)
-    TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr_arg(fxparg);
-    bool one_ptr_arg_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 1.0, fxparg, one_ptr_arg.value, one_ptr_arg.fpt);
-    if (one_ptr_arg_created)
-        one_ptr_arg.value = TaffoMath::createGlobalConst(
-            M, "one_ptr_arg" + S_arg_point, one_ptr_arg.fpt.scalarToLLVMType(cont), one_ptr_arg.value,
-            dataLayout.getPrefTypeAlignment(one_ptr_arg.fpt.scalarToLLVMType(cont)));
-    // Pointer to one (for returning)
-    TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr_ret(fxparg);
-    bool one_ptr_ret_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 1.0, fxparg, one_ptr_ret.value, one_ptr_ret.fpt);
-    if (one_ptr_ret_created)
-        one_ptr_ret.value = TaffoMath::createGlobalConst(
-            M, "one_ptr_arg" + S_arg_point, one_ptr_ret.fpt.scalarToLLVMType(cont), one_ptr_ret.value,
-            dataLayout.getPrefTypeAlignment(one_ptr_ret.fpt.scalarToLLVMType(cont)));
-    */
-    // ----------------------------------------------------
     // Basic blocks
 
     // Block for the initialization of the preparation loop (check if the argument is negative, check if the argument is 1, check if the argument is 0, enter first loop)
@@ -147,28 +127,60 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     // End block
     BasicBlock *end = BasicBlock::Create(cont, "end", newfs);
 
+    // Result block
+    BasicBlock *result = BasicBlock::Create(cont, "result", newfs);
+
 
     // Blocks for special cases
-    /*
-    BasicBlock *checkArgIsZero = BasicBlock::Create(cont, "check_arg_is_zero", newfs);
-    BasicBlock *argIsZero = BasicBlock::Create(cont, "arg_is_zero", newfs);
+    BasicBlock *checkArgIsZeroNeg = BasicBlock::Create(cont, "check_arg_is_zero_neg", newfs);
+    BasicBlock *argIsZeroNeg = BasicBlock::Create(cont, "arg_is_zero_neg", newfs);
 
     BasicBlock *checkArgIsOne = BasicBlock::Create(cont, "check_arg_is_one", newfs);
     BasicBlock *argIsOne = BasicBlock::Create(cont, "arg_is_one", newfs);
 
-    BasicBlock *checkArgIsNegative = BasicBlock::Create(cont, "check_arg_is_negative", newfs);
-    BasicBlock *argIsNegative = BasicBlock::Create(cont, "arg_is_negative", newfs);
-    */
+    builder.CreateBr(checkArgIsOne);
+    builder.SetInsertPoint(checkArgIsOne);
 
-    // TODO arg boundaries and special cases
+    // Check if the argument is one
+    Value *arg_is_one = builder.CreateICmpEQ(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_arg, 1), "arg_is_one");
+
+    builder.CreateCondBr(arg_is_one, argIsOne, checkArgIsZeroNeg);
+
+    {
+        builder.SetInsertPoint(argIsOne);
+
+        // If the argument is one, return one
+        LLVM_DEBUG(dbgs() << "===== Argument is one. Sqrt is one.\n");
+        builder.CreateStore(ConstantInt::get(int_type_ret, 1), return_value_ptr);
+
+        builder.CreateBr(result);
+    }
+
+    builder.SetInsertPoint(checkArgIsZeroNeg);
+
+    // Check if the argument is zero or negative
+    Value *arg_is_zero_neg = builder.CreateICmpSLE(builder.CreateLoad(getElementTypeFromValuePointer(arg_ptr), arg_ptr), ConstantInt::get(int_type_arg, 0), "arg_is_zero_neg");
+
+    builder.CreateCondBr(arg_is_zero_neg, argIsZeroNeg, init);
+
+    {
+        builder.SetInsertPoint(argIsZeroNeg);
+
+        // If the argument is zero or negative, return zero
+        LLVM_DEBUG(dbgs() << "===== ERROR: Argument is zero or negative. Sqrt cannot continue.\n");
+        builder.CreateStore(ConstantInt::get(int_type_internal, 0), return_value_ptr);
+
+        builder.CreateBr(result);
+    }
+
 
     // ----------------------------------------------------
     // Initialisation of the preparation loop
 
+    builder.SetInsertPoint(init);
+
     LLVM_DEBUG(dbgs() << "Create init"
                     << "\n");
-    builder.CreateBr(init);
-    builder.SetInsertPoint(init);
 
     // Support variables that we use internally
     // The argument is created above
@@ -202,8 +214,6 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     TaffoMath::pair_ftp_value<llvm::Constant *> four_ptr(fxpret);
     // Pointer to 1 in the return (narrow) fixed point type
     TaffoMath::pair_ftp_value<llvm::Constant *> one_ptr(fxparg);
-    // Pointer to 2 in the return fixed point type
-    TaffoMath::pair_ftp_value<llvm::Constant *> two_ptr(fxpret);
     // Pointer to An
     TaffoMath::pair_ftp_value<llvm::Constant *> An_ptr(fxpret);
 
@@ -223,8 +233,6 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
         cont, ref, 4.0, fxparg, four_ptr.value, four_ptr.fpt);
     bool one_ptr_created = TaffoMath::createFixedPointFromConst(
         cont, ref, 1.0, fxparg, one_ptr.value, one_ptr.fpt);
-    bool two_ptr_created = TaffoMath::createFixedPointFromConst(
-        cont, ref, 2.0, fxpret, two_ptr.value, two_ptr.fpt);
     bool An_ptr_created = TaffoMath::createFixedPointFromConst(
         cont, ref, flttofix::compute_An(fxpret.scalarFracBitsAmt()), fxpret, An_ptr.value, An_ptr.fpt);
   
@@ -232,7 +240,7 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     if (!(lower_ptr_created && upper_ptr_created
         && zero_ptr_created && quarter_ptr_created
         && four_ptr_created && one_ptr_created 
-        && two_ptr_created && An_ptr_created)) {
+        && An_ptr_created)) {
         LLVM_DEBUG(dbgs() << "===== ERROR: Could not create one or more of the initialisation constants\n");
         llvm_unreachable("Could not create one or more of the initialisation constants. Sqrt cannot continue.");
         return false;
@@ -256,10 +264,6 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     one_ptr.value = TaffoMath::createGlobalConst(
         M, "one_ptr" + S_arg_point, one_ptr.fpt.scalarToLLVMType(cont), one_ptr.value,
         dataLayout.getPrefTypeAlignment(one_ptr.fpt.scalarToLLVMType(cont)));
-    two_ptr.value = TaffoMath::createGlobalConst(
-        M, "two_ptr" + S_ret_point, two_ptr.fpt.scalarToLLVMType(cont), two_ptr.value,
-        dataLayout.getPrefTypeAlignment(two_ptr.fpt.scalarToLLVMType(cont)));
-    
 
     // ----------------------------------------------------
     LLVM_DEBUG(dbgs() << "Starting preparation loop"
@@ -279,8 +283,6 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
     LLVM_DEBUG(dbgs() << "zero_value: ");
     zero_value->print(dbgs(), true);
     LLVM_DEBUG(dbgs() << "\n");
-
-    auto two_value = builder.CreateLoad(getElementTypeFromValuePointer(two_ptr.value), two_ptr.value, "two");
 
     LLVM_DEBUG(dbgs() << "Boundaries set"
                     << "\n");
@@ -598,10 +600,21 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
                     x_false, 
                     "x_shifted_select");
 
+    builder.CreateStore(return_value, return_value_ptr);
 
-    builder.CreateRet(return_value);    
 
-    return true;
+    builder.CreateBr(result);
+
+    // ----------------------------------------------------
+    {
+        builder.SetInsertPoint(result);
+
+        // Return the result
+        Value *return_value = builder.CreateLoad(getElementTypeFromValuePointer(return_value_ptr), return_value_ptr, "return_value");
+        builder.CreateRet(return_value);    
+
+        return true;
+    }
 }
 
 
