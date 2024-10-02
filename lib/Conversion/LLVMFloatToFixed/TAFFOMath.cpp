@@ -1063,6 +1063,14 @@ bool FloatToFixed::convertLibmFunction(
     return flttofix::createSqrt(this, NewFunc, OldFunc);
   }
 
+  if (taffo::start_with(fName, "hypot")) {
+    return flttofix::createHypot(this, NewFunc, OldFunc);
+  }
+
+  if (taffo::start_with(fName, "pow")) {
+    return flttofix::createPow(this, NewFunc, OldFunc);
+  }
+
   if (taffo::start_with(fName, "log10")) {
     return createLog10(this, NewFunc, OldFunc);
   }

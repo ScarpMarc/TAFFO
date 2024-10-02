@@ -168,7 +168,7 @@ bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf)
 
         // If the argument is zero or negative, return zero
         LLVM_DEBUG(dbgs() << "===== ERROR: Argument is zero or negative. Sqrt cannot continue.\n");
-        builder.CreateStore(ConstantInt::get(int_type_internal, 0), return_value_ptr);
+        builder.CreateStore(ConstantInt::get(int_type_ret, 0), return_value_ptr);
 
         builder.CreateBr(result);
     }
