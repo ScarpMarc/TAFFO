@@ -14,6 +14,8 @@ namespace flttofix
 bool createSqrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 bool createHypot(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
 bool createPow(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
+bool createCbrt(FloatToFixed *ref, llvm::Function *newfs, llvm::Function *oldf);
+
 
 /// Number of iterations for the sqrt CORDIC algorithm
 constexpr int cordic_sqrt_iterations = TaffoMath::TABLELENGHT;

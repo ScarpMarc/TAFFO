@@ -19,6 +19,7 @@ add_llvm_library(${SELF} OBJECT BUILDTREE_ONLY
   CordicSqrt.cpp
   CordicHypot.cpp
   CordicPow.cpp
+  CordicCbrt.cpp
 
   ADDITIONAL_HEADERS
   FixedPointType.h
